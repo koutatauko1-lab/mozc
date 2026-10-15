@@ -1,0 +1,354 @@
+<title>ドパガキIME 演出プレビュー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=Chakra+Petch:wght@600;700&display=swap">
+<style>
+/* Layout: one arcade screen. Full-bleed canvas field behind a centered "desk" with a typing box and a mock candidate window; HUD controls on top. Deliberately single dark theme. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0a14;
+  --panel: #16142a;
+  --line: #2c2850;
+  --fg: #ecebff;
+  --muted: #9a97c4;
+  --break: #ff2a3d;
+  --rank: #4da3ff;
+  --font-display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-hud: "Chakra Petch", "Consolas", monospace;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  overflow: hidden; margin: 0;
+}
+#field { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+#flash { position: fixed; inset: 0; background: var(--break); opacity: 0; pointer-events: none; z-index: 5; mix-blend-mode: screen; }
+#banner {
+  position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 6;
+  font-family: var(--font-display); text-align: center; line-height: 1;
+}
+#banner span { display: block; opacity: 0; font-size: clamp(64px, 18vw, 220px); letter-spacing: .02em; white-space: nowrap; }
+#stage {
+  position: relative; z-index: 3; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center;
+  padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  will-change: transform;
+}
+header { text-align: center; display: grid; gap: 6px; }
+h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(22px, 4vw, 34px); margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: 13px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
+.controls label { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+select, button {
+  font: 700 13px var(--font-body); color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--rank); outline-offset: 2px; }
+.desk { width: min(560px, 100%); display: grid; gap: 14px; }
+textarea {
+  width: 100%; box-sizing: border-box; min-height: 92px; resize: none;
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; font: 400 17px/1.6 var(--font-body);
+}
+/* mock candidate window */
+.cand-wrap { position: relative; width: min(300px, 100%); padding: 3px; border-radius: 14px; background: var(--rank); box-shadow: 0 0 var(--glow, 8px) var(--rank); transition: box-shadow .2s; }
+.cand-wrap.sss { background: conic-gradient(from var(--spin, 0deg), #ff3b3b, #ffb43b, #f7ff3b, #3bff7a, #3bd8ff, #6a3bff, #ff3bd5, #ff3b3b); }
+.cand { background: #1d1b2a; border-radius: 11px; overflow: hidden; }
+.cand ol { list-style: none; margin: 0; padding: 0; counter-reset: c; }
+.cand li { counter-increment: c; display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; border-bottom: 1px solid #2a2838; font-size: 17px; }
+.cand li::before { content: counter(c) "."; font: 600 11px var(--font-hud); color: #7c7a92; width: 14px; }
+.cand li:last-child { border-bottom: 0; }
+.cand li.sel { background: linear-gradient(90deg, var(--rank), color-mix(in srgb, var(--rank) 40%, #7b2cff)); color: #fff; font-weight: 700; }
+.badge {
+  position: absolute; top: -14px; right: -10px; font: 700 22px var(--font-hud); color: var(--rank);
+  text-shadow: 0 0 10px var(--rank), 0 2px 0 #000; transform-origin: center; font-style: italic;
+}
+.hud { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.rank-box { display: flex; align-items: baseline; gap: 10px; }
+.rank { font-family: var(--font-display); font-size: 44px; line-height: 1; color: var(--rank); text-shadow: 0 0 18px var(--rank); min-width: 2.2em; }
+.combo { font: 700 30px var(--font-hud); font-variant-numeric: tabular-nums; }
+.combo small { font-size: 13px; color: var(--muted); letter-spacing: .12em; margin-left: 4px; }
+.ladder { display: flex; gap: 6px; font: 600 11px var(--font-hud); color: var(--muted); flex-wrap: wrap; }
+.ladder span { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; }
+.ladder span.on { color: #fff; border-color: currentColor; }
+.note { color: var(--muted); font-size: 12px; text-align: center; margin: 0; max-width: 60ch; }
+</style>
+
+<canvas id="field"></canvas>
+<div id="flash"></div>
+<div id="banner"><span id="bannerText"></span></div>
+
+<main id="stage">
+  <header>
+    <h1>ドパガキIME 演出プレビュー</h1>
+    <p>下の入力欄で何か打ってみて。BackSpaceでBREAK。</p>
+  </header>
+
+  <div class="controls">
+    <label for="sound">効果音</label>
+    <select id="sound">
+      <option value="pico">ピコピコ（8bit）</option>
+      <option value="type">タイプライター</option>
+      <option value="hit">打撃（格ゲー）</option>
+      <option value="taiko">和太鼓</option>
+      <option value="sparkle">キラキラ</option>
+      <option value="mecha">メカ（レーザー）</option>
+      <option value="off">ミュート</option>
+    </select>
+    <button id="demo" type="button">自動デモ（SSSまで）</button>
+    <button id="reset" type="button">リセット</button>
+  </div>
+
+  <div class="desk">
+    <div class="hud">
+      <div class="rank-box"><div class="rank" id="rank">B</div><div class="combo"><span id="combo">0</span><small>COMBO</small></div></div>
+      <div class="ladder" id="ladder"><span data-r="B">B 0〜</span><span data-r="A">A 10〜</span><span data-r="S">S 30〜</span><span data-r="SS">SS 50〜</span><span data-r="SSS">SSS 100〜</span></div>
+    </div>
+    <textarea id="input" placeholder="ここに打ってみて（Google日本語入力でもOK）" aria-label="試し打ち欄"></textarea>
+    <div class="cand-wrap" id="candWrap">
+      <div class="badge" id="badge">x0</div>
+      <div class="cand"><ol id="candList"></ol></div>
+    </div>
+  </div>
+  <p class="note">本物はMozcの変換候補ウィンドウと画面全体に、これと同じ演出が出る想定。スマホは自動デモで見てね。</p>
+</main>
+
+<script>
+(() => {
+  const RANKS = [
+    { name: "B",   min: 0,   color: "#4da3ff", shake: 0,  burst: 4,  glow: 8 },
+    { name: "A",   min: 10,  color: "#3be37a", shake: 1,  burst: 10, glow: 14 },
+    { name: "S",   min: 30,  color: "#ffd23f", shake: 3,  burst: 18, glow: 22 },
+    { name: "SS",  min: 50,  color: "#ff4fd8", shake: 6,  burst: 30, glow: 32 },
+    { name: "SSS", min: 100, color: "rainbow", shake: 10, burst: 50, glow: 44 },
+  ];
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = id => document.getElementById(id);
+  const stage = $("stage"), root = document.documentElement;
+  let combo = 0, rankIdx = 0, hue = 0, shakeAmt = 0;
+
+  // ---------- canvas particles ----------
+  const cv = $("field"), cx = cv.getContext("2d");
+  let W = 0, H = 0, dpr = 1;
+  const resize = () => { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0); };
+  addEventListener("resize", resize); resize();
+  const parts = [];
+  const colorFor = () => RANKS[rankIdx].color === "rainbow" ? `hsl(${(hue + Math.random() * 120) % 360} 100% 62%)` : RANKS[rankIdx].color;
+  function burst(x, y, n, opts = {}) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = (opts.speed || 6) * (0.4 + Math.random());
+      parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - (opts.lift || 1.5), life: 1, decay: 0.012 + Math.random() * 0.02,
+        size: (opts.size || 3) * (0.5 + Math.random()), color: opts.color || colorFor(), shard: !!opts.shard, rot: Math.random() * 6 });
+    }
+  }
+  // ---------- bezel glow + sparks ----------
+  // B: none / A: faint glow / S: thicker + occasional sparks / SS: pulsing + constant sparks / SSS: rainbow chase + sparks from all edges
+  const EDGE = [
+    { w: 0,  blur: 0,  alpha: 0,   sparks: 0 },
+    { w: 3,  blur: 14, alpha: .45, sparks: 0 },
+    { w: 6,  blur: 22, alpha: .7,  sparks: .06 },
+    { w: 9,  blur: 30, alpha: .85, sparks: .6 },
+    { w: 13, blur: 42, alpha: 1,   sparks: 2.2 },
+  ];
+  let edgeT = 0;
+  function edgePoint() {
+    const per = 2 * (W + H), d = Math.random() * per;
+    if (d < W) return { x: d, y: 0, nx: 0, ny: 1 };
+    if (d < W + H) return { x: W, y: d - W, nx: -1, ny: 0 };
+    if (d < 2 * W + H) return { x: d - W - H, y: H, nx: 0, ny: -1 };
+    return { x: 0, y: d - 2 * W - H, nx: 1, ny: 0 };
+  }
+  function drawEdge() {
+    const e = EDGE[rankIdx];
+    edgeT += 0.05;
+    if (!e.w) return;
+    const pulse = rankIdx >= 3 ? 1 + 0.35 * Math.sin(edgeT * (rankIdx === 4 ? 3 : 2)) : 1;
+    const lw = e.w * pulse;
+    let stroke;
+    if (rankIdx === 4 && cx.createConicGradient) {
+      stroke = cx.createConicGradient(edgeT, W / 2, H / 2);
+      for (let k = 0; k <= 6; k++) stroke.addColorStop(k / 6, `hsl(${k * 60} 100% 60%)`);
+    } else stroke = getComputedStyle(root).getPropertyValue("--rank").trim() || "#4da3ff";
+    cx.save();
+    cx.globalAlpha = e.alpha;
+    cx.globalCompositeOperation = "lighter";
+    cx.strokeStyle = stroke;
+    cx.shadowColor = rankIdx === 4 ? `hsl(${hue} 100% 60%)` : stroke;
+    cx.shadowBlur = e.blur * pulse;
+    cx.lineWidth = lw * 2;
+    cx.strokeRect(0, 0, W, H);
+    cx.lineWidth = lw * 0.8; cx.globalAlpha = Math.min(1, e.alpha + .2);
+    cx.strokeRect(lw * .6, lw * .6, W - lw * 1.2, H - lw * 1.2);
+    cx.restore();
+    // sparks flying inward from the edge
+    let n = e.sparks; if (reduce) n *= .3;
+    while (n > 0) {
+      if (n < 1 && Math.random() > n) break;
+      const p = edgePoint(), s = 4 + Math.random() * (4 + rankIdx * 2), spread = (Math.random() - .5) * 1.4;
+      parts.push({ x: p.x, y: p.y, vx: p.nx * s + (p.ny ? spread * s : 0), vy: p.ny * s + (p.nx ? spread * s : 0) - 1,
+        life: 1, decay: .025 + Math.random() * .03, size: 1.5 + Math.random() * 2, color: colorFor(), shard: true, rot: Math.atan2(p.ny, p.nx) });
+      n -= 1;
+    }
+  }
+
+  function tick() {
+    hue = (hue + 3) % 360;
+    cx.clearRect(0, 0, W, H);
+    cx.globalCompositeOperation = "lighter";
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.vx *= 0.985; p.life -= p.decay; p.rot += 0.2;
+      if (p.life <= 0) { parts.splice(i, 1); continue; }
+      cx.globalAlpha = p.life; cx.fillStyle = p.color;
+      if (p.shard) { cx.save(); cx.translate(p.x, p.y); cx.rotate(p.rot); cx.fillRect(-p.size, -p.size / 3, p.size * 2.4, p.size / 1.5); cx.restore(); }
+      else { cx.beginPath(); cx.arc(p.x, p.y, p.size, 0, Math.PI * 2); cx.fill(); }
+    }
+    cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+    drawEdge();
+    // shake
+    if (shakeAmt > 0.2 && !reduce) {
+      stage.style.transform = `translate(${(Math.random() - .5) * shakeAmt * 2}px, ${(Math.random() - .5) * shakeAmt * 2}px)`;
+      shakeAmt *= 0.86;
+    } else { stage.style.transform = ""; shakeAmt = 0; }
+    // rainbow tint
+    if (RANKS[rankIdx].color === "rainbow") root.style.setProperty("--rank", `hsl(${hue} 100% 62%)`);
+    root.style.setProperty("--spin", `${hue}deg`);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---------- banner ----------
+  const bannerText = $("bannerText");
+  let bannerAnim;
+  function showBanner(text, color, kind) {
+    bannerText.textContent = text;
+    bannerText.style.color = color;
+    bannerText.style.textShadow = `0 0 30px ${color}, 0 0 80px ${color}, 0 6px 0 #000`;
+    bannerAnim && bannerAnim.cancel();
+    const frames = kind === "break"
+      ? [{ opacity: 0, transform: "scale(2.4) rotate(-4deg)" }, { opacity: 1, transform: "scale(1) rotate(-4deg)", offset: .12 }, { opacity: 1, transform: "scale(1.04) rotate(-4deg)", offset: .7 }, { opacity: 0, transform: "scale(.9) translateY(30px) rotate(-6deg)" }]
+      : [{ opacity: 0, transform: "scale(.3)" }, { opacity: 1, transform: "scale(1.15)", offset: .18 }, { opacity: 1, transform: "scale(1)", offset: .7 }, { opacity: 0, transform: "scale(1.6)" }];
+    bannerAnim = bannerText.animate(frames, { duration: kind === "break" ? 1100 : 1000, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" });
+  }
+
+  // ---------- sound (synthesized, 6 sets) ----------
+  let ac;
+  const ensureAudio = () => { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (ac && ac.state === "suspended") ac.resume(); return ac; };
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur + .02);
+  }
+  function noise(dur, vol, hp = 1000, delay = 0) {
+    const t = ac.currentTime + delay, len = Math.floor(ac.sampleRate * dur), b = ac.createBuffer(1, len, ac.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = b; f.type = "highpass"; f.frequency.value = hp; g.gain.value = vol;
+    s.connect(f).connect(g).connect(ac.destination); s.start(t);
+  }
+  const SOUNDS = {
+    pico:    { key: r => tone("square", 660 + r * 120 + Math.random() * 80, 880 + r * 160, .06, .06), up: () => [523, 659, 784, 1046].forEach((f, i) => tone("square", f, f, .09, .07, i * .07)), brk: () => tone("square", 440, 55, .5, .09) },
+    type:    { key: () => noise(.03, .35, 2500), up: () => { tone("sine", 1760, 1760, .6, .12); tone("sine", 2637, 2637, .5, .05); }, brk: () => { noise(.25, .5, 300); tone("triangle", 180, 60, .35, .12); } },
+    hit:     { key: r => { tone("sine", 160 + r * 20, 50, .09, .25); noise(.04, .18, 1800); }, up: () => { tone("sine", 90, 40, .4, .35); noise(.3, .3, 600); }, brk: () => { noise(.5, .55, 200); tone("sawtooth", 220, 40, .6, .12); } },
+    taiko:   { key: r => tone("sine", 140 + r * 15, 70, .16, .35), up: () => [0, .14, .28].forEach(d => tone("sine", 110, 55, .3, .45, d)), brk: () => { tone("sine", 90, 35, .9, .5); noise(.15, .2, 900, .02); } },
+    sparkle: { key: r => tone("sine", 1500 + Math.random() * 900 + r * 200, 2400 + r * 200, .09, .05), up: () => [1046, 1318, 1568, 2093, 2637].forEach((f, i) => tone("sine", f, f, .25, .06, i * .05)), brk: () => [1568, 1174, 880, 587].forEach((f, i) => tone("triangle", f, f * .7, .2, .07, i * .08)) },
+    mecha:   { key: r => tone("sawtooth", 1400 + r * 200, 300, .07, .04), up: () => { tone("sawtooth", 200, 2400, .35, .06); tone("square", 300, 3000, .35, .03); }, brk: () => { tone("sawtooth", 1800, 40, .6, .08); noise(.4, .3, 500); } },
+  };
+  const sel = $("sound");
+  try { const saved = localStorage.getItem("dopagaki-sound"); if (saved && (saved in SOUNDS || saved === "off")) sel.value = saved; } catch (e) {}
+  sel.addEventListener("change", () => { try { localStorage.setItem("dopagaki-sound", sel.value); } catch (e) {} if (ensureAudio() && SOUNDS[sel.value]) SOUNDS[sel.value].up(); });
+  const play = (which) => { const s = SOUNDS[sel.value]; if (!s || !ensureAudio()) return; try { s[which](rankIdx); } catch (e) {} };
+
+  // ---------- state / UI ----------
+  const rankEl = $("rank"), comboEl = $("combo"), badge = $("badge"), candWrap = $("candWrap"), ladder = $("ladder");
+  function rankOf(c) { let i = 0; RANKS.forEach((r, k) => { if (c >= r.min) i = k; }); return i; }
+  function paintRank() {
+    const r = RANKS[rankIdx];
+    if (r.color !== "rainbow") root.style.setProperty("--rank", r.color);
+    rankEl.textContent = r.name;
+    candWrap.classList.toggle("sss", r.color === "rainbow");
+    candWrap.style.setProperty("--glow", r.glow + "px");
+    ladder.querySelectorAll("span").forEach(s => s.classList.toggle("on", s.dataset.r === r.name));
+  }
+  function render() {
+    comboEl.textContent = combo;
+    badge.textContent = "x" + combo;
+    badge.animate([{ transform: "scale(1.5)" }, { transform: "scale(1)" }], { duration: 160, easing: "ease-out" });
+  }
+  function originPoint() {
+    const b = candWrap.getBoundingClientRect();
+    return { x: b.right - 10, y: b.top + 4 };
+  }
+  function hit() {
+    combo++;
+    const prev = rankIdx; rankIdx = rankOf(combo);
+    const r = RANKS[rankIdx];
+    const o = originPoint();
+    burst(o.x, o.y, r.burst, { speed: 4 + rankIdx * 1.6, size: 2.5 + rankIdx * .6 });
+    if (rankIdx >= 3 && Math.random() < (rankIdx === 4 ? .5 : .2)) burst(Math.random() * W, Math.random() * H * .6, r.burst, { speed: 7, size: 3.5, lift: 2 });
+    shakeAmt = Math.max(shakeAmt, r.shake);
+    if (rankIdx > prev) {
+      paintRank();
+      showBanner(r.name + " RANK!!", r.color === "rainbow" ? `hsl(${hue} 100% 62%)` : r.color, "up");
+      for (let k = 0; k < 2 + rankIdx * 2; k++) burst(Math.random() * W, Math.random() * H, 30, { speed: 8, size: 4 });
+      shakeAmt = r.shake * 2.2 + 4;
+      play("up");
+    } else play("key");
+    render();
+  }
+  function breakCombo() {
+    if (combo === 0) { play("brk"); return; }
+    const o = originPoint();
+    burst(o.x, o.y, 60, { color: "#ff2a3d", shard: true, speed: 10, size: 5 });
+    burst(W / 2, H / 2, 80, { color: "#ff6a3d", shard: true, speed: 14, size: 6 });
+    $("flash").animate([{ opacity: .75 }, { opacity: 0 }], { duration: 450, easing: "ease-out" });
+    showBanner("BREAK", "#ff2a3d", "break");
+    shakeAmt = 14;
+    play("brk");
+    combo = 0; rankIdx = 0; paintRank(); render();
+  }
+
+  // candidate mock: reflects what you type
+  const candList = $("candList"), input = $("input");
+  const toKata = s => s.replace(/[ぁ-ゖ]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
+  function renderCands() {
+    const word = (input.value.split(/[\s、。\n]/).pop() || "").slice(-12) || "ドパガキ";
+    const opts = [...new Set([word, toKata(word), word + "！", word.slice(0, Math.max(1, Math.ceil(word.length / 2))), "ドパガキ", "どぱがき"])].slice(0, 6);
+    candList.innerHTML = "";
+    opts.forEach((t, i) => { const li = document.createElement("li"); li.textContent = t; if (i === 0) li.className = "sel"; candList.appendChild(li); });
+  }
+  const IGNORE = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab", "Escape"]);
+  input.addEventListener("keydown", e => {
+    ensureAudio();
+    if (e.key === "Backspace") { breakCombo(); return; }
+    if (IGNORE.has(e.key)) return;
+    hit();
+  });
+  input.addEventListener("input", renderCands);
+
+  // demo
+  let demoTimer = null;
+  $("demo").addEventListener("click", () => {
+    ensureAudio();
+    if (demoTimer) { clearTimeout(demoTimer); demoTimer = null; $("demo").textContent = "自動デモ（SSSまで）"; return; }
+    $("demo").textContent = "デモ停止";
+    const text = "どぱがきIMEかんせいしたやっぱりこれからのじだいはIMEでもどーぱみんだしていかないとね";
+    let i = 0;
+    const step = () => {
+      if (combo >= 112) { breakCombo(); demoTimer = null; $("demo").textContent = "自動デモ（SSSまで）"; return; }
+      input.value += text[i++ % text.length]; renderCands(); hit();
+      demoTimer = setTimeout(step, 55 + Math.random() * 60);
+    };
+    step();
+  });
+  $("reset").addEventListener("click", () => { input.value = ""; combo = 0; rankIdx = 0; paintRank(); render(); renderCands(); });
+
+  // realistic resting state: start mid-run at A rank
+  combo = 14; rankIdx = rankOf(combo); input.value = "ドパガキIMEつくってる"; paintRank(); comboEl.textContent = combo; badge.textContent = "x" + combo; renderCands();
+})();
+</script>
