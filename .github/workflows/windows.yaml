@@ -1,8 +1,16 @@
 name: CI for Windows
 # https://github.com/google/mozc/blob/master/docs/build_mozc_in_windows.md
+#
+# Dopagaki IME fork: only the x64 installer is built. `quick_check` builds the
+# renderer and the TIP without Qt (and runs the dopagaki unit tests) so that
+# compile errors show up early. `package` runs only after it passes.
 
-# Run on push.
-on: push
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +21,88 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build_on_x64:
+  quick_check:
+    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        # This command uses src/third_party_cache as the download cache.
+        run: |
+          python build_tools/update_deps.py
+
+      # The most recent disk cache (usually the one saved by the last `package`
+      # job) is restored. Bump "v1" to start over from an empty cache.
+      - name: Restore bazel disk cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: bazel-disk-cache
+          key: bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}-${{ github.run_attempt }}-quick
+          restore-keys: |
+            bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-
+
+      - name: Build renderer and TIP
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk build --config release_build --disk_cache=%GITHUB_WORKSPACE%\bazel-disk-cache //renderer/win32:win32_renderer_main //win32/tip:mozc_tip64
+
+      # Exit code 4 means "no test targets were found", which is expected
+      # until the first dopagaki test is added.
+      - name: Run dopagaki tests
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          call bazelisk test --config release_build --disk_cache=%GITHUB_WORKSPACE%\bazel-disk-cache --build_tests_only --test_tag_filters=dopagaki --test_output=errors //renderer/win32:all
+          if %ERRORLEVEL% EQU 4 (
+            echo No dopagaki tests yet.
+            exit /b 0
+          )
+          exit /b %ERRORLEVEL%
+
+      - name: Check bazel disk cache size
+        id: disk-cache-size
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'bazel-disk-cache'
+          $bytes = 0
+          if (Test-Path $dir) {
+            $sum = (Get-ChildItem $dir -Recurse -File -Force | Measure-Object Length -Sum).Sum
+            if ($sum) { $bytes = $sum }
+          }
+          Write-Host ("bazel disk cache: {0:N2} GB" -f ($bytes / 1GB))
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free / 1GB, 1)}}
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "too_large=$([int]($bytes -gt 5GB))"
+
+      - name: Save bazel disk cache
+        if: ${{ !cancelled() && steps.disk-cache-size.outputs.too_large == '0' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: bazel-disk-cache
+          key: bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}-${{ github.run_attempt }}-quick
+
+  package:
+    needs: quick_check
     # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
     runs-on: windows-2025
     timeout-minutes: 120
@@ -38,18 +127,59 @@ jobs:
         run: |
           python build_tools/update_deps.py
 
+      - name: Try to restore built Qt
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: src/third_party/qt
+          key: qt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/build_qt.py', 'src/build_tools/update_deps.py') }}
+
       - name: Build Qt
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         shell: cmd
         working-directory: .\src
         run: |
           python build_tools/build_qt.py --release --confirm_license
 
+      # Saved right away so that a later build failure does not throw it away.
+      - name: Save built Qt
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: src/third_party/qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
       # This is needed only for GitHub Actions where free disk space is quite limited.
       - name: Delete Qt src to save disk space
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         shell: cmd
         working-directory: .\src
         run: |
           rmdir third_party\qt_src /s /q
+
+      - name: Restore bazel disk cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: bazel-disk-cache
+          key: bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}-${{ github.run_attempt }}-package
+          restore-keys: |
+            bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-
+
+      # mozc_version.py replaces the last digit of REVISION with the platform
+      # digit, so the run number is multiplied by 10. Every installer gets a
+      # newer version, which makes the new renderer replace the old one.
+      - name: Bump REVISION with the run number
+        shell: pwsh
+        working-directory: .\src
+        run: |
+          $rev = (100 + [int]$env:GITHUB_RUN_NUMBER) * 10
+          if ($rev -gt 65535) { throw "REVISION $rev is out of the 16-bit range." }
+          $path = Join-Path $PWD 'version.bzl'
+          $text = [IO.File]::ReadAllText($path)
+          $new = [regex]::Replace($text, '(?m)^REVISION = \d+$', "REVISION = $rev")
+          if ($new -eq $text) { throw 'REVISION line was not found in version.bzl.' }
+          [IO.File]::WriteAllText($path, $new)
+          Select-String -Path $path -Pattern '^REVISION'
 
       - name: build artifacts
         shell: cmd
@@ -57,269 +187,33 @@ jobs:
         env:
           ANDROID_NDK_HOME: ""
         run: |
-          bazelisk build package --config release_build
+          bazelisk build package --config release_build --disk_cache=%GITHUB_WORKSPACE%\bazel-disk-cache
 
       - name: upload Mozc64_x64.msi
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: Mozc64_x64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
-          if-no-files-found: warn
+          if-no-files-found: error
 
-  build_universal_on_x64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
-    runs-on: windows-2025
-    timeout-minutes: 120
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
+      - name: Check bazel disk cache size
+        id: disk-cache-size
+        if: ${{ !cancelled() }}
+        shell: pwsh
         run: |
-          python build_tools/update_deps.py
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'bazel-disk-cache'
+          $bytes = 0
+          if (Test-Path $dir) {
+            $sum = (Get-ChildItem $dir -Recurse -File -Force | Measure-Object Length -Sum).Sum
+            if ($sum) { $bytes = $sum }
+          }
+          Write-Host ("bazel disk cache: {0:N2} GB" -f ($bytes / 1GB))
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free / 1GB, 1)}}
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "too_large=$([int]($bytes -gt 5GB))"
 
-      - name: Build Qt
-        shell: cmd
-        working-directory: .\src
-        run: |
-          python build_tools/build_qt.py --release --confirm_license
-
-      # This is needed only for GitHub Actions where free disk space is quite limited.
-      - name: Delete Qt src to save disk space
-        shell: cmd
-        working-directory: .\src
-        run: |
-          rmdir third_party\qt_src /s /q
-
-      - name: build artifacts
-        shell: cmd
-        working-directory: .\src
-        env:
-          ANDROID_NDK_HOME: ""
-        run: |
-          bazelisk build package --config release_build --config win_universal_installer
-
-      - name: upload Mozc64_universal.msi
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - name: Save bazel disk cache
+        if: ${{ !cancelled() && steps.disk-cache-size.outputs.too_large == '0' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          name: Mozc64_universal.msi
-          path: src/bazel-bin/win32/installer/Mozc64.msi
-          if-no-files-found: warn
-
-  build_on_arm64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows11-Arm64-Readme.md
-    runs-on: windows-11-arm
-    timeout-minutes: 120
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: false
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
-        run: |
-          python build_tools/update_deps.py
-
-      - name: Build Qt
-        shell: cmd
-        working-directory: .\src
-        run: |
-          python build_tools/build_qt.py --release --confirm_license
-
-      # This is needed only for GitHub Actions where free disk space is quite limited.
-      - name: Delete Qt src to save disk space
-        shell: cmd
-        working-directory: .\src
-        run: |
-          rmdir third_party\qt_src /s /q
-
-      - name: build artifacts
-        shell: cmd
-        working-directory: .\src
-        env:
-          ANDROID_NDK_HOME: ""
-        run: |
-          bazelisk build package --config release_build
-
-      - name: upload Mozc64_arm64.msi
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: Mozc64_arm64.msi
-          path: src/bazel-bin/win32/installer/Mozc64.msi
-          if-no-files-found: warn
-
-  test_on_x64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
-    runs-on: windows-2025
-    timeout-minutes: 120
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: false
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
-        run: |
-          python build_tools/update_deps.py
-
-      - name: runtests
-        shell: cmd
-        working-directory: .\src
-        env:
-          ANDROID_NDK_HOME: ""
-        run: |
-          bazelisk test ... -c dbg --build_tests_only --build_event_json_file=bep.jsonl
-
-      - name: Collect failing test logs
-        if: failure()
-        shell: cmd
-        working-directory: .\src
-        run: |
-          python build_tools\collect_test_logs.py --bep bep.jsonl --out "%GITHUB_WORKSPACE%\test_logs"
-
-      - name: Upload failing test logs
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: test-logs-${{ runner.os }}-${{ runner.arch }}
-          path: test_logs
-          if-no-files-found: ignore
-
-  test_on_arm64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows11-Arm64-Readme.md
-    runs-on: windows-11-arm
-    timeout-minutes: 120
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: false
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
-        run: |
-          python build_tools/update_deps.py
-
-      - name: runtests
-        shell: cmd
-        working-directory: .\src
-        env:
-          ANDROID_NDK_HOME: ""
-        run: |
-          bazelisk test ... -c dbg --build_tests_only --build_event_json_file=bep.jsonl
-
-      - name: Collect failing test logs
-        if: failure()
-        shell: cmd
-        working-directory: .\src
-        run: |
-          python build_tools\collect_test_logs.py --bep bep.jsonl --out "%GITHUB_WORKSPACE%\test_logs"
-
-      - name: Upload failing test logs
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: test-logs-${{ runner.os }}-${{ runner.arch }}
-          path: test_logs
-          if-no-files-found: ignore
-
-  # actions/cache works without this job, but having this would increase the likelihood of cache hit
-  # in other jobs. Another approach would be to use "needs:".
-  # https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
-  cache_deps_on_x64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
-    runs-on: windows-2025
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: false
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
-        run: |
-          python build_tools/update_deps.py --cache_only
-
-  # actions/cache works without this job, but having this would increase the likelihood of cache hit
-  # in other jobs. Another approach would be to use "needs:".
-  # https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
-  cache_deps_on_arm64:
-    # https://github.com/actions/runner-images/blob/main/images/windows/Windows11-Arm64-Readme.md
-    runs-on: windows-11-arm
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          submodules: false
-          persist-credentials: false
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install Dependencies
-        shell: cmd
-        working-directory: .\src
-        # This command uses src/third_party_cache as the download cache.
-        run: |
-          python build_tools/update_deps.py --cache_only
+          path: bazel-disk-cache
+          key: bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}-${{ github.run_attempt }}-package
