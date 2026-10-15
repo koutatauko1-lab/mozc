@@ -165,21 +165,35 @@ jobs:
           restore-keys: |
             bazel-disk-${{ runner.os }}-${{ runner.arch }}-v1-
 
-      # mozc_version.py replaces the last digit of REVISION with the platform
-      # digit, so the run number is multiplied by 10. Every installer gets a
-      # newer version, which makes the new renderer replace the old one.
+      # Every installer gets a newer REVISION so that the new TIP restarts the
+      # old renderer/server (they shut down on a version mismatch).
+      # Editing REVISION in version.bzl does not work because the default dev
+      # channel forces it to 100, and --action_env would invalidate every C++
+      # action in the disk cache. So MOZC_VERSION is given only to the action
+      # of //base:mozc_version_txt, which already reads it via
+      # --use_mozc_version_env. The last digit stays 0 (= Windows).
       - name: Bump REVISION with the run number
         shell: pwsh
         working-directory: .\src
         run: |
           $rev = (100 + [int]$env:GITHUB_RUN_NUMBER) * 10
           if ($rev -gt 65535) { throw "REVISION $rev is out of the 16-bit range." }
-          $path = Join-Path $PWD 'version.bzl'
+          $ver_text = [IO.File]::ReadAllText((Join-Path $PWD 'version.bzl'))
+          $nums = 'MAJOR', 'MINOR', 'BUILD_OSS' | ForEach-Object {
+            $m = [regex]::Match($ver_text, "(?m)^$_ = (\d+)$")
+            if (-not $m.Success) { throw "$_ was not found in version.bzl." }
+            $m.Groups[1].Value
+          }
+          $version = ($nums + $rev) -join '.'
+          $path = Join-Path $PWD 'base\BUILD.bazel'
           $text = [IO.File]::ReadAllText($path)
-          $new = [regex]::Replace($text, '(?m)^REVISION = \d+$', "REVISION = $rev")
-          if ($new -eq $text) { throw 'REVISION line was not found in version.bzl.' }
+          $pattern = '(?m)^(    name = "mozc_version_txt",\r?\n)'
+          if ([regex]::Matches($text, $pattern).Count -ne 1) { throw 'mozc_version_txt was not found in base/BUILD.bazel.' }
+          $env_line = '    env = {"MOZC_VERSION": "' + $version + '"},' + "`n"
+          $new = [regex]::Replace($text, $pattern, { param($m) $m.Groups[1].Value + $env_line })
           [IO.File]::WriteAllText($path, $new)
-          Select-String -Path $path -Pattern '^REVISION'
+          Write-Host "MOZC_VERSION=$version"
+          Select-String -Path $path -Pattern 'mozc_version_txt' -Context 0,2
 
       - name: build artifacts
         shell: cmd

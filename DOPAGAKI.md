@@ -371,7 +371,8 @@ optional DopagakiConfig dopagaki_config = 7000;
 - 速いチェック用のジョブ `quick_check` を追加：Qt を作らずに `//renderer/win32:win32_renderer_main` と `//win32/tip:mozc_tip64` とドパガキの単体テストだけをビルド・実行する。これが通ってから本番の `package` ジョブを動かす（`needs:`）。
 - Qt のビルド結果（`src/third_party/qt`）を `actions/cache` で保存し、2回目以降は「Build Qt」を飛ばす（キー：`build_tools/build_qt.py` と `build_tools/update_deps.py` のハッシュ）。
 - Bazel のディスクキャッシュ（`--disk_cache`）を `actions/cache` で保存・復元する（キャッシュの上限に注意。大きすぎて保存できない場合はやめてよい）。
-- （任意）`version.bzl` の `REVISION` を `(100 + github.run_number) × 10` にしてからビルドする。こうすると毎回バージョンが上がり、新しいレンダラーに自動で入れ替わりやすい。×10 にするのは、`build_tools/mozc_version.py` が REVISION の最後の1桁をプラットフォーム番号で置き換えるため。各桁は 65535 を超えないこと。
+- （任意）REVISION を `(100 + github.run_number) × 10` にしてからビルドする。こうすると毎回バージョンが上がり、新しい TIP が古いレンダラー／サーバーを自動で終了させて入れ替える（`renderer_client.cc` のバージョン比較）。各桁は 65535 を超えないこと。
+  - **注意（フェーズ0で判明）**：`version.bzl` の `REVISION` を書き換えても効かない（既定の dev チャンネルでは `mozc_version.py` が REVISION を 100 に固定する）。`--action_env=MOZC_VERSION=...` は全部の C++ のキャッシュが無効になるので使わない。CI の中だけで `base/BUILD.bazel` の `mozc_version_txt` に `env = {"MOZC_VERSION": "3.34.6345.1030"}` を足して渡す（`windows.yaml` の「Bump REVISION」）。
 - **確認**：Actions のビルドが通り、2回目以降が速くなる。できたインストーラーで普通に入力できる。
 
 ### フェーズ1：配線（数が数えられることの確認）
@@ -571,3 +572,8 @@ jobs:
 （Claude Code が更新する。日付・やったこと・次にやること・こーたに確認中のこと）
 
 - 2026-10-16：指示書作成。フォーク作成済み、素の Mozc を CI でビルドしてインストール・動作確認済み（約45分）。Linux / macOS / Android / Lint のワークフローは GitHub 上で無効化済み。次はフェーズ0。
+- 2026-10-16：**フェーズ0 実装**（こーたの確認待ち）。
+  - こーたのPCに GitHub CLI を入れ、`C:\Users\kouta\mozc` にクローン（`--filter=blob:none`）。git の名前・メールはこのリポジトリだけに設定。
+  - `windows.yaml` を付録Aの形に。初回（run 2）は quick_check 20分＋package 56分（うち Qt 作り 25分）で成功。キャッシュ：Qt 77MB、Bazel ディスクキャッシュ 約0.2GB（quick）／約1.1GB（package、圧縮後）。ランナーの空きは C: 約29GB、D: 約143GB。
+  - テストがまだ無いときは `bazel test` が終了コード4（テスト無し）になるので、成功扱いにしている。
+  - REVISION の上げ方が付録の案では効かなかった（第6章フェーズ0の注意を参照）ので直した。2回目のビルドで、速くなったかとバージョン番号を確認する。
