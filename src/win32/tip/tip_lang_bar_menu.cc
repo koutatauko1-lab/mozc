@@ -43,6 +43,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -53,6 +54,7 @@
 #include "win32/base/text_icon.h"
 #include "win32/base/tsf_profile.h"
 #include "win32/tip/tip_dll_module.h"
+#include "win32/tip/tip_dopagaki_menu.h"
 #include "win32/tip/tip_lang_bar_callback.h"
 #include "win32/tip/tip_resource.h"
 
@@ -257,13 +259,26 @@ STDMETHODIMP TipLangBarButton::OnClick(TfLBIClick click, POINT point,
     return S_OK;
   }
 
+  // Dopagaki: the check marks of the Dopagaki items follow the current
+  // settings, which may have been changed in another application. They are
+  // computed here and never stored in |menu_data|.
+  std::optional<TipDopagakiMenu::Settings> dopagaki_settings;
+
   wil::unique_hmenu menu(::CreatePopupMenu());
   for (size_t i = 0; i < menu_data_size(); ++i) {
     TipLangBarMenuData* data = menu_data(i);
     const UINT id = static_cast<UINT>(data->item_id_);
+    int flags = data->flags_;
+    if (flags != TF_LBMENUF_SEPARATOR && TipDopagakiMenu::IsMenuItem(id)) {
+      if (!dopagaki_settings.has_value()) {
+        dopagaki_settings = TipDopagakiMenu::LoadSettings();
+      }
+      flags = static_cast<int>(
+          TipDopagakiMenu::GetMenuItemFlags(id, *dopagaki_settings));
+    }
     MENUITEMINFO info = {};
     info.cbSize = CCSIZEOF_STRUCT(MENUITEMINFO, hbmpItem);
-    if (data->flags_ == TF_LBMENUF_SEPARATOR) {
+    if (flags == TF_LBMENUF_SEPARATOR) {
       info.fMask |= MIIM_FTYPE;
       info.fType |= MFT_SEPARATOR;
     } else {
@@ -276,7 +291,7 @@ STDMETHODIMP TipLangBarButton::OnClick(TfLBIClick click, POINT point,
       info.fMask |= MIIM_STRING;
       info.dwTypeData = data->text_;
 
-      switch (data->flags_) {
+      switch (flags) {
         case TF_LBMENUF_RADIOCHECKED:
           info.fMask |= MIIM_STATE;
           info.fState |= MFS_CHECKED;
@@ -652,6 +667,10 @@ STDMETHODIMP TipLangBarToggleButton::OnMenuSelect(UINT menu_id) {
   if (result != S_OK) {
     return result;
   }
+  if (TipDopagakiMenu::IsMenuItem(data->item_id_)) {
+    // Dopagaki items are not input modes. The selected mode and its icon stay.
+    return result;
+  }
   TipLangBarMenuData* selected = menu_data(menu_selected_);
   selected->flags_ &= ~TF_LBMENUF_RADIOCHECKED;
   data->flags_ |= TF_LBMENUF_RADIOCHECKED;
@@ -703,6 +722,10 @@ HRESULT TipLangBarToggleButton::SelectMenuItem(UINT menu_id) {
   bool item_state_changed = false;
   for (size_t i = 0; i < menu_data_size(); ++i) {
     TipLangBarMenuData* data = menu_data(i);
+    if (TipDopagakiMenu::IsMenuItem(data->item_id_)) {
+      // Not an input mode. The check marks are set in OnClick.
+      continue;
+    }
     if (data->item_id_ == menu_id) {
       if ((data->flags_ & TF_LBMENUF_RADIOCHECKED) != 0 ||
           menu_selected_ != static_cast<UINT>(i)) {

@@ -59,6 +59,10 @@ class DopagakiOverlay {
   void StartAnimation();
   // Puts the overlay above other topmost windows (e.g. the candidate window).
   void BringToTop();
+  // Drops all the effects at once and hides the overlay (e.g. when the
+  // effects are turned off). The frame callback is called once more so that
+  // the owner can put back what it moved.
+  void Stop();
   void Destroy();
 
  private:

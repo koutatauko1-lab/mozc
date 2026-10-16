@@ -94,6 +94,14 @@ class SenderThread {
 
   void UpdateDopagakiEvent(const DopagakiEvent& new_event) {
     absl::MutexLock lock(&mutex_);
+    if (has_dopagaki_event_ && !new_event.has_key_count()) {
+      // Only settings. Keep the pending counters.
+      if (new_event.has_settings()) {
+        *dopagaki_event_.mutable_settings() = new_event.settings();
+      }
+      command_event_.SetEvent();
+      return;
+    }
     // Settings are not cumulative. Keep unsent settings when a newer event
     // without settings overwrites the pending one.
     const bool keep_settings = has_dopagaki_event_ &&

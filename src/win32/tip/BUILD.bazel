@@ -205,6 +205,7 @@ mozc_cc_library(
         ":tip_display_attributes",
         ":tip_dll_module",
         ":tip_dopagaki",
+        ":tip_dopagaki_menu",
         ":tip_dopagaki_sound",
         ":tip_edit_session",
         ":tip_enum_display_attributes",
@@ -253,6 +254,7 @@ mozc_cc_library(
         ":tip_text_service",
         ":tip_thread_context",
         "//base/win32:win_util",
+        "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer/win32:dopagaki_sound_synth",
         "//renderer/win32:win32_renderer_client",
@@ -272,6 +274,21 @@ mozc_cc_library(
         "//bazel/win32:xaudio2",
         "//protocol:config_cc_proto",
         "//renderer/win32:dopagaki_sound_synth",
+    ],
+)
+
+# Dopagaki: the settings items in the input mode menu (phase 6).
+mozc_cc_library(
+    name = "tip_dopagaki_menu",
+    srcs = ["tip_dopagaki_menu.cc"],
+    hdrs = ["tip_dopagaki_menu.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":tip_lang_bar_callback",
+        "//client",
+        "//client:client_interface",
+        "//protocol:config_cc_proto",
     ],
 )
 
@@ -423,6 +440,7 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":tip_dll_module",
+        ":tip_dopagaki_menu",
         ":tip_lang_bar_callback",
         ":tip_resource",
         "//base/win32:com",

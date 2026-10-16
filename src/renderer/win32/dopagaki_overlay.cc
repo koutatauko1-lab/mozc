@@ -203,6 +203,14 @@ void DopagakiOverlay::BringToTop() {
   }
 }
 
+void DopagakiOverlay::Stop() {
+  effects_.Clear();
+  if (frame_callback_) {
+    frame_callback_();
+  }
+  Hide();
+}
+
 void DopagakiOverlay::Destroy() {
   if (window_ != nullptr && ::IsWindow(window_)) {
     if (timer_running_) {

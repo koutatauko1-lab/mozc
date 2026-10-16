@@ -64,6 +64,9 @@ class DopagakiState {
 
   uint64_t combo() const { return combo_; }
   DopagakiRank rank() const { return GetDopagakiRank(combo_); }
+  // Sets the combo to 0 without a break, e.g. when the effects are turned
+  // off. The counters of the sessions are kept.
+  void ResetCombo() { combo_ = 0; }
 
  private:
   struct Session {

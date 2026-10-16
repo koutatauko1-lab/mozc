@@ -221,6 +221,27 @@ HRESULT TipLangBar::InitLangBar(TipLangBarCallback* text_service) {
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kAbout, IDS_ABOUT, 0,
          0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kHelp, IDS_HELP, 0, 0},
+        // Dopagaki (fork only). The check marks are updated from the current
+        // settings every time the menu is shown (TipLangBarButton::OnClick).
+        {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiToggle,
+         IDS_DOPAGAKI_TOGGLE, 0, 0},
+        {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundPico,
+         IDS_DOPAGAKI_SOUND_PICO, 0, 0},
+        {kTipLangBarItemTypeDefault,
+         TipLangBarCallback::kDopagakiSoundTypewriter,
+         IDS_DOPAGAKI_SOUND_TYPEWRITER, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundHit,
+         IDS_DOPAGAKI_SOUND_HIT, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundTaiko,
+         IDS_DOPAGAKI_SOUND_TAIKO, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundSparkle,
+         IDS_DOPAGAKI_SOUND_SPARKLE, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundMecha,
+         IDS_DOPAGAKI_SOUND_MECHA, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundMute,
+         IDS_DOPAGAKI_SOUND_MUTE, 0, 0},
     };
 
     constexpr bool kNonMenuButton = false;

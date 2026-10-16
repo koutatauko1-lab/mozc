@@ -52,6 +52,15 @@
 #define IDS_OBSERVABLE_SUGGEST_WINDOW 131
 #define IDS_CANDIDATE_WINDOW 132
 #define IDS_INDICATOR_WINDOW 133
+// Dopagaki (fork only)
+#define IDS_DOPAGAKI_TOGGLE 140
+#define IDS_DOPAGAKI_SOUND_PICO 141
+#define IDS_DOPAGAKI_SOUND_TYPEWRITER 142
+#define IDS_DOPAGAKI_SOUND_HIT 143
+#define IDS_DOPAGAKI_SOUND_TAIKO 144
+#define IDS_DOPAGAKI_SOUND_SPARKLE 145
+#define IDS_DOPAGAKI_SOUND_MECHA 146
+#define IDS_DOPAGAKI_SOUND_MUTE 147
 
 // Historically, the TSF version of Mozc used the resource ID 102 for showing
 // IMM32 icon.  For this reason, we keep this ID for the product icon.

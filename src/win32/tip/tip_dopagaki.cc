@@ -268,6 +268,13 @@ bool TipDopagaki::OnRendererCallback(WPARAM wparam, LPARAM lparam) {
   return true;
 }
 
+void TipDopagaki::SendSettings(const config::Config::DopagakiConfig& settings) {
+  // Without the counters, the renderer only applies the settings.
+  DopagakiEvent event;
+  *event.mutable_settings() = settings;
+  Win32RendererClient::OnDopagakiEvent(event);
+}
+
 }  // namespace tsf
 }  // namespace win32
 }  // namespace mozc

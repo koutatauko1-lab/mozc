@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "absl/log/check.h"
@@ -46,8 +47,10 @@
 #include "base/coordinates.h"
 #include "base/win32/win_util.h"
 #include "client/client_interface.h"
+#include "config/config_handler.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/dopagaki_effects.h"
@@ -98,6 +101,10 @@ void WindowManager::Initialize() {
   indicator_window_->Initialize();
   infolist_window_->Create(nullptr);
   infolist_window_->ShowWindow(SW_HIDE);
+  // Dopagaki: the settings saved by mozc_server. Later changes come with
+  // DopagakiEvent::settings.
+  ApplyDopagakiSettings(
+      config::ConfigHandler::GetSharedConfig()->dopagaki_config());
 }
 
 void WindowManager::AsyncHideAllWindows() {
@@ -467,8 +474,18 @@ void WindowManager::PreTranslateMessage(const MSG& message) {
 }
 
 void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
+  if (event.has_settings()) {
+    ApplyDopagakiSettings(event.settings());
+  }
+  // The counters are followed even while the effects are off, so that the
+  // keystrokes typed meanwhile do not appear at once when turned on again.
   const std::vector<DopagakiAction> actions =
       dopagaki_state_->OnEvent(event, absl::Now());
+  if (!dopagaki_enabled_) {
+    // K6: no effects and no sounds. The combo starts from 0 when turned on.
+    dopagaki_state_->ResetCombo();
+    return;
+  }
   if (actions.empty()) {
     return;
   }
@@ -546,6 +563,26 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
     effects.HideComboLabel();
   }
   dopagaki_overlay_->StartAnimation();
+}
+
+void WindowManager::ApplyDopagakiSettings(
+    const config::Config::DopagakiConfig& settings) {
+  dopagaki_sound_set_ = settings.sound_set();
+  const bool was_enabled = dopagaki_enabled_;
+  dopagaki_enabled_ = settings.enabled();
+  if (was_enabled && !dopagaki_enabled_) {
+    // Turned off: everything on the screen disappears at once, and the
+    // candidate window goes back to the colors of rank B.
+    dopagaki_state_->ResetCombo();
+    dopagaki_overlay_->Stop();
+    main_window_->SetDopagakiRank(DopagakiRank::kB, 0);
+    cascading_window_->SetDopagakiRank(DopagakiRank::kB, 0);
+  }
+  const std::wstring message =
+      L"[dopagaki] settings: enabled=" +
+      std::to_wstring(dopagaki_enabled_ ? 1 : 0) + L" sound_set=" +
+      std::to_wstring(static_cast<int>(dopagaki_sound_set_)) + L"\n";
+  ::OutputDebugStringW(message.c_str());
 }
 
 void WindowManager::RequestDopagakiSound(uint32_t receiver_window_handle,

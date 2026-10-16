@@ -180,6 +180,14 @@ BEGIN
     IDS_CANDIDATE_WINDOW             "Mozc 候補ウィンドウ"
     IDS_INDICATOR_WINDOW             "Mozc インジケータ ウィンドウ"
 #endif
+    IDS_DOPAGAKI_TOGGLE             "ドパガキ演出"
+    IDS_DOPAGAKI_SOUND_PICO         "効果音：ピコピコ（8bit）"
+    IDS_DOPAGAKI_SOUND_TYPEWRITER   "効果音：タイプライター"
+    IDS_DOPAGAKI_SOUND_HIT          "効果音：打撃（格ゲー）"
+    IDS_DOPAGAKI_SOUND_TAIKO        "効果音：和太鼓"
+    IDS_DOPAGAKI_SOUND_SPARKLE      "効果音：キラキラ"
+    IDS_DOPAGAKI_SOUND_MECHA        "効果音：メカ（レーザー）"
+    IDS_DOPAGAKI_SOUND_MUTE         "効果音：ミュート"
 END
 
 STRINGTABLE LANGUAGE LANG_ENGLISH, SUBLANG_NEUTRAL
@@ -221,6 +229,14 @@ BEGIN
     IDS_OBSERVABLE_SUGGEST_WINDOW    "Mozc Suggestion Candidate Window"
     IDS_CANDIDATE_WINDOW             "Mozc Candidate Window"
 #endif
+    IDS_DOPAGAKI_TOGGLE             "Dopagaki effects"
+    IDS_DOPAGAKI_SOUND_PICO         "Sound: Pico (8-bit)"
+    IDS_DOPAGAKI_SOUND_TYPEWRITER   "Sound: Typewriter"
+    IDS_DOPAGAKI_SOUND_HIT          "Sound: Hit (fighting game)"
+    IDS_DOPAGAKI_SOUND_TAIKO        "Sound: Taiko drum"
+    IDS_DOPAGAKI_SOUND_SPARKLE      "Sound: Sparkle"
+    IDS_DOPAGAKI_SOUND_MECHA        "Sound: Mecha (laser)"
+    IDS_DOPAGAKI_SOUND_MUTE         "Sound: Mute"
 END
 
 #endif    // Japanese resources

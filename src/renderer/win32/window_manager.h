@@ -82,10 +82,14 @@ class WindowManager {
   // Dopagaki: asks the TIP to play a sound (the renderer's sandbox cannot).
   void RequestDopagakiSound(uint32_t receiver_window_handle,
                             DopagakiSoundKind kind);
+  // Dopagaki: applies the settings chosen from the menu (phase 6).
+  void ApplyDopagakiSettings(const config::Config::DopagakiConfig& settings);
 
   std::unique_ptr<DopagakiState> dopagaki_state_;
   std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;
-  // Chosen from the menu in phase 6. PICO by default.
+  // Chosen from the menu (phase 6). Read from the config at startup and
+  // updated by DopagakiEvent::settings.
+  bool dopagaki_enabled_ = true;
   DopagakiSoundSet dopagaki_sound_set_ =
       config::Config::DopagakiConfig::PICO;
   // The positions of the candidate windows without shaking.

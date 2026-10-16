@@ -59,6 +59,16 @@ class TipLangBarCallback : public IUnknown {
 
     // Shortcut commands
     kReconversion = 41,
+
+    // Dopagaki (fork only): see win32/tip/tip_dopagaki_menu.h.
+    kDopagakiToggle = 50,
+    kDopagakiSoundPico = 51,
+    kDopagakiSoundTypewriter = 52,
+    kDopagakiSoundHit = 53,
+    kDopagakiSoundTaiko = 54,
+    kDopagakiSoundSparkle = 55,
+    kDopagakiSoundMecha = 56,
+    kDopagakiSoundMute = 57,
   };
 
   virtual ~TipLangBarCallback() = default;

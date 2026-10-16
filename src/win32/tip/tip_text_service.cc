@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -62,6 +63,7 @@
 #include "win32/tip/tip_display_attributes.h"
 #include "win32/tip/tip_dll_module.h"
 #include "win32/tip/tip_dopagaki.h"
+#include "win32/tip/tip_dopagaki_menu.h"
 #include "win32/tip/tip_dopagaki_sound.h"
 #include "win32/tip/tip_edit_session.h"
 #include "win32/tip/tip_edit_session_impl.h"
@@ -936,6 +938,22 @@ class TipTextServiceImpl
       case TipLangBarCallback::kHelp:
         // Open the about dialog.
         return Process::OpenBrowser(kHelpUrl) ? S_OK : E_FAIL;
+      case TipLangBarCallback::kDopagakiToggle:
+      case TipLangBarCallback::kDopagakiSoundPico:
+      case TipLangBarCallback::kDopagakiSoundTypewriter:
+      case TipLangBarCallback::kDopagakiSoundHit:
+      case TipLangBarCallback::kDopagakiSoundTaiko:
+      case TipLangBarCallback::kDopagakiSoundSparkle:
+      case TipLangBarCallback::kDopagakiSoundMecha:
+      case TipLangBarCallback::kDopagakiSoundMute: {
+        // Dopagaki (phase 6): save the settings, then tell the renderer.
+        const std::optional<TipDopagakiMenu::Settings> settings =
+            TipDopagakiMenu::OnMenuSelect(menu_id);
+        if (settings.has_value()) {
+          TipDopagaki::SendSettings(*settings);
+        }
+        return S_OK;
+      }
       default:
         return S_OK;
     }

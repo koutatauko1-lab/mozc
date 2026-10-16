@@ -185,7 +185,7 @@ TIP とレンダラーの間には、**古い命令を新しい命令で上書�
 | K3 | 数えないキー | **決定**：Shift / Ctrl / Alt / Windows キー / アプリキー / CapsLock / Tab / Esc / 半角全角 / NumLock / ScrollLock（プレビューと同じ＋IME切替キー）。変換・無変換キーは数える | 1 |
 | K4 | しばらく打たないとき | **決定**：3秒入力が無ければ、ふちの光・火花・コンボ表示は1秒かけてフェードアウトして消える。コンボの数とランクは保持し、次の1打ですぐ復活。出ている途中の演出（バナー・粒）は最後まで出す | 3 |
 | K5 | 候補ウィンドウが出ていないとき（英字の直接入力など）のコンボ表示 | **決定**：入力位置（カーソル）の近くに「`29 COMBO A`」を出し、2秒で消える（元ネタの動画と同じ雰囲気）。カーソル位置が分からないアプリでは打っているウィンドウの端あたり。粒もここから出す | 2 |
-| K6 | メニューに「ドパガキ演出 ON/OFF」も付けるか | 付ける（会議中などに一時的に止められるように） | 6 |
+| K6 | メニューに「ドパガキ演出 ON/OFF」も付けるか | **決定**：付ける（会議中などに一時的に止められるように） | 6 |
 | K7 | IMEの表示名を「ドパガキIME」に変えるか | 変えない（Mozc のまま） | 7 |
 
 **制約（こーたに説明済みにしておくこと）**：画面の揺れは、自分で描いている演出（粒・バナー・ふち・コンボ表示）と候補ウィンドウにだけかかる。他のアプリの画面そのものは揺らせない（他アプリのウィンドウを動かすのは危険なのでやらない）。
@@ -330,9 +330,11 @@ optional DopagakiConfig dopagaki_config = 7000;
 - **注意**：`TipLangBarToggleButton`（`tip_lang_bar_menu.cc`）は、選んだ項目を「入力モード」としてラジオチェックし、アイコンまで切り替える作りになっている。ドパガキの項目でこれが起きると、タスクバーのアイコンが壊れる。そのため：
   - `OnMenuSelect`：ドパガキの ID なら、コールバックだけ呼んで、`menu_selected_` やラジオチェックには触らない。
   - `SelectMenuItem`：ドパガキの項目は無視する。
-  - `InitMenu`（メニューを開くたびに呼ばれる）：今の設定を読んで、ドパガキ項目のチェックをその場で付ける。
-- `TipTextServiceImpl::OnMenuSelect`：ドパガキの ID なら、`ClientFactory::NewClient()` で作ったクライアントで `GetConfig` → `dopagaki_config` を変更 → `SetConfig`。続けて `settings` を入れた `DopagakiEvent` を送って、レンダラーにすぐ反映させる。
-- レンダラーは起動時に `ConfigHandler::GetSharedConfig()` から設定を読み、以後は `settings` 付きの命令で更新する。
+  - メニューを開くとき：タスクバーの「あ」の右クリックメニューは `TipLangBarButton::OnClick` が毎回作っている（`InitMenu` は使われない）。ここで今の設定を読んで（`TipDopagakiMenu::LoadSettings`）、ドパガキ項目のチェックをその場で付ける。チェックの状態は `menu_data` に保存しない。
+- 実装は `win32/tip/tip_dopagaki_menu.{h,cc}`（`TipDopagakiMenu`）にまとめる。
+- `TipTextServiceImpl::OnMenuSelect`：ドパガキの ID なら、`ClientFactory::NewClient()` で作ったクライアント（エラー画面は出さない設定）で `GetConfig` → `dopagaki_config` を変更 → `SetConfig`。続けて `settings` だけを入れた `DopagakiEvent`（回数なし）を送って、レンダラーにすぐ反映させる（`TipDopagaki::SendSettings`）。送信待ちの打鍵の回数があれば、それは消さずに `settings` だけ重ねる。
+- レンダラーは起動時に `ConfigHandler::GetSharedConfig()` から設定を読み、以後は `settings` 付きの命令で更新する（`WindowManager::ApplyDopagakiSettings`）。
+- K6 の OFF のとき：画面の演出（粒・バナー・ふち・コンボ表示・候補ウィンドウの枠と `x42`）はすぐ全部消え、候補ウィンドウはランク B の色に戻る。音も鳴らさない。打鍵の回数は裏で追い続けるが、コンボは 0 のまま。ON に戻すと 0 から数え直す。
 
 ### 4.10 ビルド設定
 
@@ -349,6 +351,8 @@ optional DopagakiConfig dopagaki_config = 7000;
 | `protocol/renderer_command.proto` | `DopagakiEvent` と `dopagaki = 1000` を追加 |
 | `protocol/config.proto` | `DopagakiConfig` と `dopagaki_config = 7000` を追加 |
 | `win32/tip/tip_dopagaki.{h,cc}`（新規） | 打鍵カウント・重複除外・送信 |
+| `win32/tip/tip_dopagaki_menu.{h,cc}`（新規） | 設定メニューのチェックと保存（フェーズ6） |
+| `win32/tip/tip_dopagaki_sound.{h,cc}`（新規） | 効果音を鳴らす（フェーズ5） |
 | `win32/tip/tip_text_service.cc` | `OnTestKeyDown` と `OnKeyDown` から呼ぶ／`OnMenuSelect` に設定変更 |
 | `win32/tip/tip_lang_bar.cc` / `tip_lang_bar_menu.cc` / `tip_lang_bar_callback.h` | メニュー項目の追加と特別扱い |
 | `win32/tip/tip_resource.h` / `tip_resource.rc` | メニューの文字列 |
@@ -601,6 +605,11 @@ jobs:
   - ログの取り方：レンダラーは Low 整合性なので、`DBWIN_*` を Low ラベル付き（SDDL `D:(A;;GA;;;WD)S:(ML;;NW;;;LW)`）で作る記録スクリプトなら取れる（確認済み）。
   - 約6分試したあとのレンダラー：CPU 時間 約23秒、メモリ 約93MB。フェーズ7で長時間の測定をする。
 - 2026-10-16：**フェーズ3 完了**（こーた OK 済み：A〜SSS のふちの光と火花・3秒でフェードアウトして次の1打で復活・BackSpace で消える、すべて確認。インストーラーは run 8、`3.34.6345.1080`）。エラーのログは無し。レンダラーは約40分で CPU 時間 約32秒、メモリ 約100MB。次はフェーズ4。
+  - K4 はこーた確認済み（案どおり。消えるのは1秒かけて）。
+  - `dopagaki_effects` にふちの状態（ランク・t・最後の打鍵からの時間）と火花を追加。テストは計26ケース。
+  - 描き方：canvas の `shadowBlur` の代わりに、内側へ薄くなる16本の帯で光を描く。SSS の回る虹（canvas の conic gradient）は、各辺に沿った13色の線形グラデーションで近似。光（影）の色は SSS では `hsl(hue, 100%, 60%)` の1色（プレビューと同じ）。
+  - ふちも揺れに合わせて動く（外側の線は画面の外まで伸ばして、揺れてもすき間が出ないようにした）。
+  - 1回目のCI（run 7）で K4 のテストが失敗：16.67ms ずつ足した待ち時間が 4000ms ちょうどにならず、フェードが 0 にならなかった（実害はほぼ無いが直した）。
 - 2026-10-16：**フェーズ4 完了**（こーた OK 済み：暗い候補ウィンドウ・区切り線・角丸・グラデーションの選択行（文字が読める）・光る外枠（SSS は虹が回る）・「x42」・一緒に揺れる・3秒で枠と x42 が消える・マウスと矢印キーで選べる、すべて確認。インストーラーは run 9、`3.34.6345.1090`）。
   - 色は `dopagaki_style.{h,cc}`（`ApplyDopagakiStyle`）でダークスタイルの上に上書き。`win32_dpi_util.cc` はダーク＋これを呼ぶだけ。用例ウィンドウ（infolist）もダークになる。
   - 選択行のグラデーションは両端を明るさ70%にした（明るい文字を読みやすくするため。2.4節で許されている調整）。選択行の枠線はやめた。
@@ -612,8 +621,8 @@ jobs:
   - run 10 は `mmreg.h` を `windows.h` より先に読んでコンパイルエラー（`xaudio2.h` を `windows.h` の後に置いて解決）。
   - 音の種類は今は「ピコピコ」固定（`WindowManager::dopagaki_sound_set_`）。フェーズ6でメニューから変える。
   - 残している小さな宿題：XAudio2 の既定デバイスが変わったとき（イヤホンを抜き差ししたときなど）の作り直しは、送信の失敗でしか検知していない。フェーズ7で確認する。
-  - K4 はこーた確認済み（案どおり。消えるのは1秒かけて）。
-  - `dopagaki_effects` にふちの状態（ランク・t・最後の打鍵からの時間）と火花を追加。テストは計26ケース。
-  - 描き方：canvas の `shadowBlur` の代わりに、内側へ薄くなる16本の帯で光を描く。SSS の回る虹（canvas の conic gradient）は、各辺に沿った13色の線形グラデーションで近似。光（影）の色は SSS では `hsl(hue, 100%, 60%)` の1色（プレビューと同じ）。
-  - ふちも揺れに合わせて動く（外側の線は画面の外まで伸ばして、揺れてもすき間が出ないようにした）。
-  - 1回目のCI（run 7）で K4 のテストが失敗：16.67ms ずつ足した待ち時間が 4000ms ちょうどにならず、フェードが 0 にならなかった（実害はほぼ無いが直した）。
+- 2026-10-16：**フェーズ6 実装済み・こーたの確認待ち**（K6 は案どおり、ON/OFF も付ける）。
+  - タスクバーの「あ」の右クリックメニューの最後に「ドパガキ演出」（チェック付き）と効果音7種（ラジオ）を追加。設定は mozc_server の設定（`dopagaki_config`）に保存されるので、PCを再起動しても残るはず。
+  - メニューは `TipLangBarButton::OnClick` が毎回作っているので、そこでチェックを付ける（4.9参照）。入力モードの選択やアイコンには触らない。
+  - OFF のときは演出も音も止め、コンボは 0 のまま（ON に戻すと 0 から）。これは仕様に書かれていなかったので、自然な形で決めた。こーたに報告して確認してもらう。
+  - レンダラーは起動時に設定を読み、変更は `settings` だけの `DopagakiEvent` で届く。設定が変わるとログ `[dopagaki] settings: enabled=… sound_set=…` が出る（打った内容は含まない）。

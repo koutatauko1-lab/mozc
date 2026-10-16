@@ -7,6 +7,7 @@
 #include <msctf.h>
 #include <windows.h>
 
+#include "protocol/config.pb.h"
 #include "win32/tip/tip_text_service.h"
 
 namespace mozc {
@@ -39,6 +40,10 @@ class TipDopagaki {
   // callback message. Returns true if it was a Dopagaki request (a sound),
   // which must not be passed to the existing handler.
   static bool OnRendererCallback(WPARAM wparam, LPARAM lparam);
+
+  // Sends the settings chosen from the menu to the renderer so that they take
+  // effect at once (phase 6).
+  static void SendSettings(const config::Config::DopagakiConfig& settings);
 };
 
 }  // namespace tsf
