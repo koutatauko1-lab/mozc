@@ -3,9 +3,10 @@
 
 #include "renderer/win32/dopagaki_sound.h"
 
-#include <mmreg.h>
 #include <wil/com.h>
 #include <windows.h>
+
+// xaudio2.h (and mmreg.h in it) needs windows.h first.
 #include <xaudio2.h>
 
 #include <array>
