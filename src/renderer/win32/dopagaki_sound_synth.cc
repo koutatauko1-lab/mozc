@@ -259,7 +259,9 @@ std::vector<float> SynthesizeDopagakiSound(
     case DopagakiConfig::MECHA:
       switch (kind) {
         case DopagakiSoundKind::kKey:
-          tone(kSawtooth, 1400 + r * 200, 300, 0.07, 0.04);
+          // Twice the preview's 0.04, as Kouta asked: with 0.04 it was the
+          // quietest key sound, about 7 dB below Pico.
+          tone(kSawtooth, 1400 + r * 200, 300, 0.07, 0.08);
           break;
         case DopagakiSoundKind::kRankUp:
           tone(kSawtooth, 200, 2400, 0.35, 0.06);

@@ -126,6 +126,16 @@ TEST(DopagakiSoundSynthTest, InvalidSoundRequests) {
       DecodeDopagakiSoundRequest(1u << 24, &sound_set, &kind, &rank));
 }
 
+TEST(DopagakiSoundSynthTest, MechaKeyIsTwiceThePreview) {
+  // Kouta asked for a louder key sound of Mecha (0.08 instead of 0.04).
+  const std::vector<float> samples = SynthesizeDopagakiSound(
+      DopagakiConfig::MECHA, DopagakiSoundKind::kKey, 0, TestRandom());
+  // The first samples of the sawtooth are about -0.94.
+  const float peak = MaxAbs(samples);
+  EXPECT_GT(peak, 0.06f);
+  EXPECT_LT(peak, 0.09f);
+}
+
 TEST(DopagakiSoundSynthTest, AllSoundsAreAudibleAndSane) {
   for (const DopagakiConfig::SoundSet sound_set :
        {DopagakiConfig::PICO, DopagakiConfig::TYPEWRITER, DopagakiConfig::HIT,
