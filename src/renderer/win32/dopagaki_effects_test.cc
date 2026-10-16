@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <utility>
 
 #include "renderer/win32/dopagaki_state.h"
@@ -342,6 +343,72 @@ TEST(DopagakiEffectsTest, FewerEdgeSparksWithReducedMotion) {
   const size_t lucky_key_particles = lucky.particles().size();
   lucky.Update(kOneFrameMs);
   EXPECT_EQ(lucky.particles().size(), lucky_key_particles + 1);
+}
+
+TEST(DopagakiEffectsTest, CandidateFrameFadesOutWithK4) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetEdgeRank(DopagakiRank::kB);
+  effects.SetCandidateWindow(DopagakiRect{.left = 10,
+                                          .top = 20,
+                                          .right = 210,
+                                          .bottom = 120,
+                                          .corner_radius = 8});
+  // Not visible before the first keystroke.
+  EXPECT_FALSE(effects.IsCandidateFrameVisible());
+  effects.OnKey(DopagakiRank::kB, 210, 20);
+  EXPECT_TRUE(effects.IsCandidateFrameVisible());
+  // Rank B has no edge glow, but the frame keeps the overlay active.
+  for (int i = 0; i < 120; ++i) {
+    effects.Update(kOneFrameMs);
+  }
+  EXPECT_TRUE(effects.particles().empty());
+  EXPECT_TRUE(effects.IsActive());
+  effects.Update(DopagakiEffects::kEdgeIdleMs +
+                 DopagakiEffects::kEdgeFadeMs);
+  EXPECT_FALSE(effects.IsCandidateFrameVisible());
+  EXPECT_FALSE(effects.IsActive());
+
+  // Hidden candidate window.
+  effects.OnKey(DopagakiRank::kB, 210, 20);
+  effects.SetCandidateWindow(std::nullopt);
+  EXPECT_FALSE(effects.IsCandidateFrameVisible());
+}
+
+TEST(DopagakiEffectsTest, Badge) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetBadge(42, DopagakiRank::kS, true);
+  ASSERT_TRUE(effects.badge().has_value());
+  EXPECT_EQ(effects.badge()->text, L"x42");
+  EXPECT_EQ(effects.badge()->color, DopagakiColorFromRgb(0xFFD23F));
+  EXPECT_DOUBLE_EQ(effects.badge()->age_ms, 0);
+  const uint64_t id = effects.badge()->id;
+
+  effects.Update(100);
+  EXPECT_DOUBLE_EQ(effects.badge()->age_ms, 100);
+  // The same text without pop keeps the id and the age.
+  effects.SetBadge(42, DopagakiRank::kS, false);
+  EXPECT_EQ(effects.badge()->id, id);
+  EXPECT_DOUBLE_EQ(effects.badge()->age_ms, 100);
+  // A new number changes the id.
+  effects.SetBadge(43, DopagakiRank::kS, true);
+  EXPECT_NE(effects.badge()->id, id);
+  EXPECT_EQ(effects.badge()->text, L"x43");
+  EXPECT_DOUBLE_EQ(effects.badge()->age_ms, 0);
+}
+
+TEST(DopagakiEffectsTest, SssBadgeFollowsTheHue) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetBadge(120, DopagakiRank::kSSS, true);
+  const uint64_t id = effects.badge()->id;
+  // 3 degrees per frame. Re-colored every 12 degrees.
+  effects.Update(kOneFrameMs);
+  effects.Update(kOneFrameMs);
+  EXPECT_EQ(effects.badge()->id, id);
+  effects.Update(kOneFrameMs);
+  effects.Update(kOneFrameMs);
+  EXPECT_NE(effects.badge()->id, id);
+  EXPECT_EQ(effects.badge()->color,
+            GetDopagakiRankColor(DopagakiRank::kSSS, effects.hue()));
 }
 
 TEST(DopagakiEffectsTest, ParticlesAreLimited) {

@@ -87,6 +87,11 @@ mozc_win32_lib(
     name = "dcomp",
 )
 
+# Dopagaki: rounded corners of the candidate window.
+mozc_win32_lib(
+    name = "dwmapi",
+)
+
 mozc_win32_lib(
     name = "dwrite",
 )

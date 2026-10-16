@@ -33,7 +33,9 @@
 #include <windows.h>
 
 #include <memory>
+#include <optional>
 
+#include "base/coordinates.h"
 #include "client/client_interface.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
@@ -70,9 +72,19 @@ class WindowManager {
  private:
   // Dopagaki: where "29 COMBO A" is shown, in DIPs on the overlay.
   D2D1_POINT_2F GetDopagakiComboLabelPosition(HWND target_window) const;
+  // Dopagaki: the candidate window in DIPs on the overlay (without shaking),
+  // or nullopt when it is hidden.
+  std::optional<DopagakiRect> GetDopagakiCandidateWindowRect() const;
+  // Dopagaki: called before each frame of the overlay.
+  void OnDopagakiFrame();
 
   std::unique_ptr<DopagakiState> dopagaki_state_;
   std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;
+  // The positions of the candidate windows without shaking.
+  std::optional<Rect> dopagaki_main_window_rect_;
+  std::optional<Rect> dopagaki_cascading_window_rect_;
+  POINT dopagaki_shake_offset_ = {0, 0};
+  int dopagaki_frame_count_ = 0;
   std::unique_ptr<CandidateWindow> main_window_;
   std::unique_ptr<CandidateWindow> cascading_window_;
   std::unique_ptr<IndicatorWindow> indicator_window_;

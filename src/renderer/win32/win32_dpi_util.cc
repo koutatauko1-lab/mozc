@@ -36,6 +36,7 @@
 
 #include "protocol/renderer_style.pb.h"
 #include "renderer/renderer_style_handler.h"
+#include "renderer/win32/dopagaki_style.h"
 
 namespace mozc {
 namespace renderer {
@@ -68,7 +69,10 @@ uint32_t GetDpiForPoint(int x, int y) {
 ::mozc::renderer::RendererStyle GetScaledRendererStyle(uint32_t dpi) {
   const double scale_factor = GetDPIScalingFactor(dpi);
 
-  RendererStyle style = RendererStyleHandler::GetRendererStyle();
+  // Dopagaki: the dark style with the Dopagaki colors.
+  RendererStyle style = RendererStyleHandler::GetRendererStyle(
+      RendererStyleHandler::ColorTheme::kDark);
+  ApplyDopagakiStyle(&style);
 
   // style.window_border is non-scalable.
   style.set_scrollbar_width(style.scrollbar_width() * scale_factor);

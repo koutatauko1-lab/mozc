@@ -280,11 +280,44 @@ void DopagakiEffects::Clear() {
   shake_y_ = 0;
   edge_rank_ = DopagakiRank::kB;
   idle_ms_ = kEdgeIdleMs + kEdgeFadeMs;
+  candidate_window_.reset();
+  badge_.reset();
 }
 
 void DopagakiEffects::SetEdgeRank(DopagakiRank rank) { edge_rank_ = rank; }
 
-float DopagakiEffects::edge_opacity() const {
+void DopagakiEffects::SetCandidateWindow(std::optional<DopagakiRect> rect) {
+  candidate_window_ = rect;
+}
+
+void DopagakiEffects::SetBadge(uint64_t combo, DopagakiRank rank, bool pop) {
+  std::wstring text = L"x" + std::to_wstring(combo);
+  badge_rank_ = rank;
+  badge_hue_ = hue_;
+  const DopagakiColor color = GetDopagakiRankColor(rank, hue_);
+  if (!badge_.has_value() || badge_->text != text) {
+    const uint64_t id = next_id_++;
+    badge_ = DopagakiBadge{.text = std::move(text), .color = color, .id = id};
+  } else {
+    SetBadgeColor(color);
+  }
+  if (pop) {
+    badge_->age_ms = 0;
+  }
+}
+
+void DopagakiEffects::SetBadgeColor(DopagakiColor color) {
+  if (badge_.has_value() && badge_->color != color) {
+    badge_->color = color;
+    badge_->id = next_id_++;
+  }
+}
+
+bool DopagakiEffects::IsCandidateFrameVisible() const {
+  return candidate_window_.has_value() && GetIdleOpacity() > 0;
+}
+
+float DopagakiEffects::GetIdleOpacity() const {
   if (idle_ms_ <= kEdgeIdleMs) {
     return 1;
   }
@@ -420,12 +453,25 @@ void DopagakiEffects::Update(double elapsed_ms) {
   edge_time_ += 0.05 * frames;
   idle_ms_ = std::min(idle_ms_ + elapsed_ms, kEdgeIdleMs + kEdgeFadeMs);
   SpawnEdgeSparks(frames);
+
+  if (badge_.has_value()) {
+    badge_->age_ms += elapsed_ms;
+    // The SSS badge follows the turning hue. Re-colored every 12 degrees to
+    // avoid drawing the text every frame.
+    if (badge_rank_ == DopagakiRank::kSSS) {
+      double diff = std::fmod(hue_ - badge_hue_ + 360.0, 360.0);
+      if (diff >= 12) {
+        badge_hue_ = hue_;
+        SetBadgeColor(GetDopagakiRankColor(DopagakiRank::kSSS, hue_));
+      }
+    }
+  }
 }
 
 bool DopagakiEffects::IsActive() const {
   return !particles_.empty() || banner_.has_value() ||
          combo_label_.has_value() || flash_opacity() > 0 ||
-         shake_amount_ > 0.2f || IsEdgeVisible();
+         shake_amount_ > 0.2f || IsEdgeVisible() || IsCandidateFrameVisible();
 }
 
 void DopagakiEffects::SpawnEdgeSparks(double frames) {

@@ -188,6 +188,9 @@ void DopagakiOverlay::StartAnimation() {
     ::SetTimer(window_, kTimerId, kTimerIntervalMs, nullptr);
     timer_running_ = true;
   }
+  if (frame_callback_) {
+    frame_callback_();
+  }
   if (!DrawFrame()) {
     OnDeviceFailure();
   }
@@ -384,6 +387,8 @@ void DopagakiOverlay::ReleaseDevice() {
   banner_text_ = {};
   combo_label_cache_id_ = 0;
   combo_label_text_ = {};
+  badge_cache_id_ = 0;
+  badge_text_ = {};
   combo_label_format_.reset();
   if (context_) {
     context_->SetTarget(nullptr);
@@ -417,6 +422,9 @@ void DopagakiOverlay::OnTimer() {
   const double elapsed_ms = (now - last_tick_microseconds_) / 1000.0;
   last_tick_microseconds_ = now;
   effects_.Update(elapsed_ms);
+  if (frame_callback_) {
+    frame_callback_();
+  }
   if (!effects_.IsActive()) {
     Hide();
     return;
@@ -456,6 +464,7 @@ bool DopagakiOverlay::DrawFrame() {
   // Text bitmaps are drawn outside of the frame's BeginDraw/EndDraw.
   UpdateBannerCache();
   UpdateComboLabelCache();
+  UpdateBadgeCache();
 
   context_->SetTarget(target_bitmap_.get());
   context_->BeginDraw();
@@ -486,6 +495,8 @@ bool DopagakiOverlay::DrawFrame() {
   }
   DrawEdge();
   context_->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+
+  DrawCandidateFrame();
 
   // K5: "29 COMBO A".
   const auto& label = effects_.combo_label();
@@ -589,18 +600,28 @@ void DopagakiOverlay::DrawEdge() {
     const float width = effects_.width();
     const float height = effects_.height();
     const double start_angle = effects_.edge_time();
-    rainbow_brushes[0] = CreateRainbowBrush(D2D1::Point2F(0, 0),
-                                            D2D1::Point2F(width, 0),
-                                            start_angle);  // Top.
-    rainbow_brushes[1] = CreateRainbowBrush(D2D1::Point2F(width, 0),
-                                            D2D1::Point2F(width, height),
-                                            start_angle);  // Right.
-    rainbow_brushes[2] = CreateRainbowBrush(D2D1::Point2F(0, height),
-                                            D2D1::Point2F(width, height),
-                                            start_angle);  // Bottom.
-    rainbow_brushes[3] = CreateRainbowBrush(D2D1::Point2F(0, 0),
-                                            D2D1::Point2F(0, height),
-                                            start_angle);  // Left.
+    const float center_x = width / 2;
+    const float center_y = height / 2;
+    // createConicGradient(t, W / 2, H / 2) with hsl(k * 60) at k / 6.
+    const auto color_at = [=](float x, float y) {
+      constexpr double kTwoPi = 2 * 3.14159265358979323846;
+      double angle = std::fmod(
+          std::atan2(y - center_y, x - center_x) - start_angle, kTwoPi);
+      if (angle < 0) {
+        angle += kTwoPi;
+      }
+      return DopagakiColorFromHsl(angle / kTwoPi * 360, 1, 0.6);
+    };
+    rainbow_brushes[0] = CreateGradientAlong(
+        D2D1::Point2F(0, 0), D2D1::Point2F(width, 0), color_at);  // Top.
+    rainbow_brushes[1] =
+        CreateGradientAlong(D2D1::Point2F(width, 0),
+                            D2D1::Point2F(width, height), color_at);  // Right.
+    rainbow_brushes[2] =
+        CreateGradientAlong(D2D1::Point2F(0, height),
+                            D2D1::Point2F(width, height), color_at);  // Bottom.
+    rainbow_brushes[3] = CreateGradientAlong(
+        D2D1::Point2F(0, 0), D2D1::Point2F(0, height), color_at);  // Left.
     for (int i = 0; i < 4; ++i) {
       if (rainbow_brushes[i]) {
         line_brushes[i] = rainbow_brushes[i].get();
@@ -645,26 +666,16 @@ void DopagakiOverlay::FillFrame(float outer, float inner,
 }
 
 wil::com_ptr_nothrow<ID2D1LinearGradientBrush>
-DopagakiOverlay::CreateRainbowBrush(D2D1_POINT_2F from, D2D1_POINT_2F to,
-                                    double start_angle) {
+DopagakiOverlay::CreateGradientAlong(
+    D2D1_POINT_2F from, D2D1_POINT_2F to,
+    const std::function<DopagakiColor(float x, float y)>& color_at) {
   constexpr int kStops = 13;
-  constexpr double kTwoPi = 2 * 3.14159265358979323846;
-  const float center_x = effects_.width() / 2;
-  const float center_y = effects_.height() / 2;
   D2D1_GRADIENT_STOP stops[kStops] = {};
   for (int i = 0; i < kStops; ++i) {
     const float t = static_cast<float>(i) / (kStops - 1);
     const float x = from.x + (to.x - from.x) * t;
     const float y = from.y + (to.y - from.y) * t;
-    // createConicGradient(startAngle, cx, cy) with hsl(k * 60) at k / 6.
-    double angle =
-        std::fmod(std::atan2(y - center_y, x - center_x) - start_angle, kTwoPi);
-    if (angle < 0) {
-      angle += kTwoPi;
-    }
-    const DopagakiColor color =
-        DopagakiColorFromHsl(angle / kTwoPi * 360, 1, 0.6);
-    stops[i] = {t, ToD2DColor(color, 1)};
+    stops[i] = {t, ToD2DColor(color_at(x, y), 1)};
   }
   // Called through ID2D1RenderTarget because ID2D1DeviceContext has another
   // CreateGradientStopCollection.
@@ -679,6 +690,140 @@ DopagakiOverlay::CreateRainbowBrush(D2D1_POINT_2F from, D2D1_POINT_2F to,
     return nullptr;
   }
   return brush;
+}
+
+void DopagakiOverlay::DrawCandidateFrame() {
+  if (!effects_.IsCandidateFrameVisible()) {
+    return;
+  }
+  const DopagakiRect& window = *effects_.candidate_window();
+  const float opacity = effects_.candidate_frame_opacity();
+  const DopagakiRank rank = effects_.edge_rank();
+  context_->SetTransform(
+      D2D1::Matrix3x2F::Translation(effects_.shake_x(), effects_.shake_y()));
+  const auto inflate = [&window](float amount) {
+    return D2D1::RoundedRect(
+        D2D1::RectF(window.left - amount, window.top - amount,
+                    window.right + amount, window.bottom + amount),
+        window.corner_radius + amount, window.corner_radius + amount);
+  };
+
+  // box-shadow: 0 0 var(--glow) var(--rank) of .cand-wrap in the preview.
+  constexpr float kGlow[] = {8, 14, 22, 32, 44};  // RANKS[].glow
+  constexpr float kFrameWidth = 3;                 // padding of .cand-wrap
+  const float glow = kGlow[static_cast<int>(rank)];
+  brush_->SetColor(ToD2DColor(GetDopagakiRankColor(rank, effects_.hue()), 1));
+  constexpr int kBands = 12;
+  const float sigma = std::max(glow / 2, 1.0f);
+  for (int i = 0; i < kBands; ++i) {
+    const float inner = kFrameWidth + glow * i / kBands;
+    const float outer = kFrameWidth + glow * (i + 1) / kBands;
+    const float x = (inner + outer) / 2 - kFrameWidth;
+    brush_->SetOpacity(0.6f * opacity *
+                       std::exp(-x * x / (2 * sigma * sigma)));
+    context_->DrawRoundedRectangle(inflate((inner + outer) / 2), brush_.get(),
+                                   outer - inner);
+  }
+
+  // The 3px frame. SSS uses the turning rainbow of .cand-wrap.sss.
+  const D2D1_ROUNDED_RECT frame = inflate(kFrameWidth / 2);
+  if (rank == DopagakiRank::kSSS) {
+    const float center_x = (window.left + window.right) / 2;
+    const float center_y = (window.top + window.bottom) / 2;
+    const double spin = effects_.hue();
+    // conic-gradient(from var(--spin), ...): 0 degrees is up, clockwise.
+    const auto color_at = [=](float x, float y) {
+      constexpr uint32_t kColors[] = {0xFF3B3B, 0xFFB43B, 0xF7FF3B, 0x3BFF7A,
+                                      0x3BD8FF, 0x6A3BFF, 0xFF3BD5, 0xFF3B3B};
+      constexpr double kRadiansToDegrees = 180 / 3.14159265358979323846;
+      const double angle =
+          std::atan2(x - center_x, center_y - y) * kRadiansToDegrees;
+      const double position =
+          std::fmod(angle - spin + 720.0, 360.0) / 360.0 * 7;
+      const int index = std::min(static_cast<int>(position), 6);
+      const float t = static_cast<float>(position - index);
+      const DopagakiColor a = DopagakiColorFromRgb(kColors[index]);
+      const DopagakiColor b = DopagakiColorFromRgb(kColors[index + 1]);
+      return DopagakiColor{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
+                           a.b + (b.b - a.b) * t};
+    };
+    const float left = window.left - kFrameWidth;
+    const float top = window.top - kFrameWidth;
+    const float right = window.right + kFrameWidth;
+    const float bottom = window.bottom + kFrameWidth;
+    const float middle_top = window.top + window.corner_radius;
+    const float middle_bottom = window.bottom - window.corner_radius;
+    struct Side {
+      D2D1_RECT_F clip;
+      D2D1_POINT_2F from;
+      D2D1_POINT_2F to;
+    };
+    const Side sides[] = {
+        {D2D1::RectF(left - 1, top - 1, right + 1, middle_top),
+         D2D1::Point2F(left, top), D2D1::Point2F(right, top)},
+        {D2D1::RectF(center_x, middle_top, right + 1, middle_bottom),
+         D2D1::Point2F(right, top), D2D1::Point2F(right, bottom)},
+        {D2D1::RectF(left - 1, middle_bottom, right + 1, bottom + 1),
+         D2D1::Point2F(left, bottom), D2D1::Point2F(right, bottom)},
+        {D2D1::RectF(left - 1, middle_top, center_x, middle_bottom),
+         D2D1::Point2F(left, top), D2D1::Point2F(left, bottom)},
+    };
+    for (const Side& side : sides) {
+      wil::com_ptr_nothrow<ID2D1LinearGradientBrush> gradient =
+          CreateGradientAlong(side.from, side.to, color_at);
+      if (!gradient) {
+        continue;
+      }
+      gradient->SetOpacity(opacity);
+      context_->PushAxisAlignedClip(side.clip, D2D1_ANTIALIAS_MODE_ALIASED);
+      context_->DrawRoundedRectangle(frame, gradient.get(), kFrameWidth);
+      context_->PopAxisAlignedClip();
+    }
+  } else {
+    brush_->SetOpacity(opacity);
+    context_->DrawRoundedRectangle(frame, brush_.get(), kFrameWidth);
+  }
+  brush_->SetOpacity(1);
+
+  // "x42": .badge { top: -14px; right: -10px } of .cand-wrap.
+  const auto& badge = effects_.badge();
+  if (badge.has_value() && badge_text_.bitmap) {
+    const float text_right = window.right + kFrameWidth + 10;
+    const float text_left = text_right - badge_text_.text_width;
+    const float text_top = window.top - kFrameWidth - 14;
+    const float scale = GetDopagakiComboLabelScale(badge->age_ms);
+    const D2D1_POINT_2F center =
+        D2D1::Point2F(text_left + badge_text_.text_width / 2,
+                      text_top + badge_text_.text_height / 2);
+    context_->SetTransform(
+        D2D1::Matrix3x2F::Scale(scale, scale, center) *
+        D2D1::Matrix3x2F::Translation(effects_.shake_x(), effects_.shake_y()));
+    const float left = text_left - badge_text_.padding;
+    const float top = text_top - badge_text_.padding;
+    const D2D1_RECT_F rect =
+        D2D1::RectF(left, top, left + badge_text_.bitmap_width,
+                    top + badge_text_.bitmap_height);
+    context_->DrawBitmap(badge_text_.bitmap.get(), &rect, opacity,
+                         D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+  }
+}
+
+void DopagakiOverlay::UpdateBadgeCache() {
+  const auto& badge = effects_.badge();
+  if (!badge.has_value()) {
+    badge_cache_id_ = 0;
+    badge_text_ = {};
+    return;
+  }
+  if (badge->id == badge_cache_id_) {
+    return;
+  }
+  badge_cache_id_ = badge->id;
+  badge_text_ = {};
+  // text-shadow: 0 0 10px var(--rank), 0 2px 0 #000 like the combo label.
+  CreateGlowText(badge->text, combo_label_format_.get(),
+                 ToD2DColor(badge->color, 1), kComboLabelGlow, 0,
+                 kComboLabelShadowY, &badge_text_);
 }
 
 void DopagakiOverlay::UpdateBannerCache() {

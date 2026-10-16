@@ -88,6 +88,25 @@ struct DopagakiComboLabel {
   uint64_t id = 0;  // Changes when |text| or |color| changes.
 };
 
+// The candidate window (phase 4) in DIPs on the overlay.
+struct DopagakiRect {
+  float left = 0;
+  float top = 0;
+  float right = 0;
+  float bottom = 0;
+  float corner_radius = 0;
+
+  friend bool operator==(const DopagakiRect&, const DopagakiRect&) = default;
+};
+
+// "x42" at the top-right corner of the candidate window.
+struct DopagakiBadge {
+  std::wstring text;
+  DopagakiColor color;
+  double age_ms = 0;  // Since the last keystroke.
+  uint64_t id = 0;    // Changes when |text| or |color| changes.
+};
+
 // 1.5 -> 1 in 160 ms after each keystroke.
 float GetDopagakiComboLabelScale(double age_ms);
 // Fades out and disappears 2 seconds after the last keystroke.
@@ -138,6 +157,10 @@ class DopagakiEffects {
   void HideComboLabel();
   // The current rank, which decides the edge glow.
   void SetEdgeRank(DopagakiRank rank);
+  // The candidate window to decorate, or nullopt when it is hidden.
+  void SetCandidateWindow(std::optional<DopagakiRect> rect);
+  // Updates "x42". |pop| restarts the 1.5 -> 1 animation.
+  void SetBadge(uint64_t combo, DopagakiRank rank, bool pop);
 
   // Advances all the effects by |elapsed_ms|.
   void Update(double elapsed_ms);
@@ -161,8 +184,16 @@ class DopagakiEffects {
   // "t" of drawEdge() in the preview. +0.05 per frame.
   double edge_time() const { return edge_time_; }
   // 1 while typing, fades to 0 after kEdgeIdleMs (K4).
-  float edge_opacity() const;
+  float edge_opacity() const { return GetIdleOpacity(); }
   bool IsEdgeVisible() const;
+  const std::optional<DopagakiRect>& candidate_window() const {
+    return candidate_window_;
+  }
+  const std::optional<DopagakiBadge>& badge() const { return badge_; }
+  // The glowing frame and the badge of the candidate window also fade out
+  // with K4.
+  float candidate_frame_opacity() const { return GetIdleOpacity(); }
+  bool IsCandidateFrameVisible() const;
 
  private:
   struct BurstOptions {
@@ -177,6 +208,8 @@ class DopagakiEffects {
   void Burst(float x, float y, int count, const BurstOptions& options);
   // Sparks flying inward from random points on the edges.
   void SpawnEdgeSparks(double frames);
+  float GetIdleOpacity() const;
+  void SetBadgeColor(DopagakiColor color);
   DopagakiColor GetParticleColor(DopagakiRank rank);
   void StartBanner(DopagakiBannerKind kind, std::wstring text,
                    DopagakiColor color);
@@ -198,6 +231,10 @@ class DopagakiEffects {
   double edge_time_ = 0;
   // Time since the last keystroke. Starts as faded out.
   double idle_ms_ = kEdgeIdleMs + kEdgeFadeMs;
+  std::optional<DopagakiRect> candidate_window_;
+  std::optional<DopagakiBadge> badge_;
+  DopagakiRank badge_rank_ = DopagakiRank::kB;
+  double badge_hue_ = 0;
 };
 
 }  // namespace win32

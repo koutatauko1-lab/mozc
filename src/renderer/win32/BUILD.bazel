@@ -107,10 +107,39 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":dopagaki_style",
         "//bazel/win32:shcore",
         "//bazel/win32:user32",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_style_handler",
+    ],
+)
+
+# Dopagaki: the colors of the candidate window. No Windows API is used.
+mozc_cc_library(
+    name = "dopagaki_style",
+    srcs = ["dopagaki_style.cc"],
+    hdrs = ["dopagaki_style.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_effects",
+        ":dopagaki_state",
+        "//protocol:renderer_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "dopagaki_style_test",
+    srcs = ["dopagaki_style_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY + ["dopagaki"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_effects",
+        ":dopagaki_state",
+        ":dopagaki_style",
+        "//protocol:renderer_cc_proto",
+        "//testing:gunit_main",
     ],
 )
 
@@ -121,12 +150,16 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":dopagaki_effects",
+        ":dopagaki_state",
+        ":dopagaki_style",
         ":resource_h",
         ":text_renderer",
         ":win32_dpi_util",
         "//base:const",
         "//base:coordinates",
         "//base/win32:wide_char",
+        "//bazel/win32:dwmapi",
         "//bazel/win32:gdi32",
         "//bazel/win32:msimg32",
         "//bazel/win32:user32",

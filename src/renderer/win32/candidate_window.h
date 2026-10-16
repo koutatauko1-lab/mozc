@@ -46,6 +46,7 @@
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_style.pb.h"
 #include "renderer/table_layout.h"
+#include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/text_renderer.h"
 
 namespace mozc {
@@ -101,6 +102,12 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
 
   void set_mouse_moving(bool moving);
 
+  // Dopagaki: the rank (and the hue of SSS) decides the color of the
+  // selected row. Repaints the window only when the color changes.
+  void SetDopagakiRank(DopagakiRank rank, double hue);
+  // Dopagaki: true if the corners are rounded (Windows 11).
+  bool dopagaki_rounded_corners() const { return dopagaki_rounded_corners_; }
+
   // If |dpi| differs from the cached DPI, updates the cached DPI, refreshes
   // DPI-dependent resources, and flags the text renderer for refresh on the
   // next UpdateLayout. Idempotent — safe to call unconditionally before
@@ -125,6 +132,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   void DrawShortcutBackground(HDC dc);
   void DrawFooter(HDC dc);
   void DrawSelectedRect(HDC dc);
+  void DrawDopagakiRowSeparators(HDC dc);
   void DrawInformationIcon(HDC dc);
   void DrawBackground(HDC dc);
   void DrawFrame(HDC dc);
@@ -207,6 +215,9 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   bool metrics_changed_;
   bool mouse_moving_;
   RendererStyle style_;
+  DopagakiRank dopagaki_rank_ = DopagakiRank::kB;
+  double dopagaki_hue_ = 0;
+  bool dopagaki_rounded_corners_ = false;
 };
 
 }  // namespace win32

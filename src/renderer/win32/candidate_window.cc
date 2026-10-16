@@ -32,9 +32,11 @@
 #include <atlbase.h>
 #include <atltypes.h>
 #include <atlwin.h>
+#include <dwmapi.h>
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -49,6 +51,9 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/table_layout.h"
+#include "renderer/win32/dopagaki_effects.h"
+#include "renderer/win32/dopagaki_state.h"
+#include "renderer/win32/dopagaki_style.h"
 #include "renderer/win32/resource.h"
 #include "renderer/win32/text_renderer.h"
 #include "renderer/win32/win32_dpi_util.h"
@@ -212,6 +217,15 @@ COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
   return RGB(color.r(), color.g(), color.b());
 }
 
+// Dopagaki: DWMWA_WINDOW_CORNER_PREFERENCE and DWMWCP_ROUND, which may be
+// missing in older SDK headers. Windows 10 does not support them.
+constexpr DWORD kDwmWindowCornerPreference = 33;
+constexpr DWORD kDwmCornerRound = 2;
+
+COLOR16 ToColor16(float value) {
+  return static_cast<COLOR16>(std::lround(value * 255) << 8);
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------------
@@ -270,7 +284,24 @@ void CandidateWindow::UpdateDpiDependentResources() {
 
 LRESULT CandidateWindow::OnCreate(LPCREATESTRUCT create_struct) {
   EnableOrDisableWindowForWorkaround();
+  // Dopagaki: rounded corners on Windows 11. Square on Windows 10.
+  const DWORD corner = kDwmCornerRound;
+  dopagaki_rounded_corners_ =
+      SUCCEEDED(::DwmSetWindowAttribute(m_hWnd, kDwmWindowCornerPreference,
+                                        &corner, sizeof(corner)));
   return 0;
+}
+
+void CandidateWindow::SetDopagakiRank(DopagakiRank rank, double hue) {
+  if (rank == dopagaki_rank_ &&
+      (rank != DopagakiRank::kSSS || hue == dopagaki_hue_)) {
+    return;
+  }
+  dopagaki_rank_ = rank;
+  dopagaki_hue_ = hue;
+  if (IsWindow() && IsWindowVisible()) {
+    Invalidate(FALSE);
+  }
 }
 
 void CandidateWindow::UpdateDpi(uint32_t dpi) {
@@ -416,6 +447,7 @@ void CandidateWindow::DoPaint(HDC dc) {
 
   DrawBackground(dc);
   DrawShortcutBackground(dc);
+  DrawDopagakiRowSeparators(dc);
   DrawSelectedRect(dc);
   DrawCells(dc);
   DrawInformationIcon(dc);
@@ -837,12 +869,30 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
 
     const CRect selected_rect =
         ToCRect(table_layout_->GetRowRect(focused_array_index));
-    FillSolidRect(dc, &selected_rect,
-                  ToColorRef(style_.focused_background_color()));
+    // Dopagaki: a horizontal gradient from the rank color to purple.
+    const DopagakiSelectionColors colors =
+        GetDopagakiSelectionColors(dopagaki_rank_, dopagaki_hue_);
+    TRIVERTEX vertices[] = {
+        {selected_rect.left, selected_rect.top, ToColor16(colors.left.r),
+         ToColor16(colors.left.g), ToColor16(colors.left.b), 0xFF00},
+        {selected_rect.right, selected_rect.bottom, ToColor16(colors.right.r),
+         ToColor16(colors.right.g), ToColor16(colors.right.b), 0xFF00}};
+    GRADIENT_RECT indices[] = {{0, 1}};
+    ::GradientFill(dc, &vertices[0], std::size(vertices), &indices[0],
+                   std::size(indices), GRADIENT_FILL_RECT_H);
+  }
+}
 
-    ::SetDCBrushColor(dc, ToColorRef(style_.focused_border_color()));
-    ::FrameRect(dc, &selected_rect,
-                static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
+void CandidateWindow::DrawDopagakiRowSeparators(HDC dc) {
+  // Lines between the rows (#2A2838, the same as the border color).
+  wil::unique_select_object prev_pen =
+      wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));
+  ::SetDCPenColor(dc, ToColorRef(style_.border_color()));
+  for (size_t i = 0; i + 1 < candidate_window_->candidate_size(); ++i) {
+    const Rect row_rect = table_layout_->GetRowRect(i);
+    const int y = row_rect.Bottom() - 1;
+    ::MoveToEx(dc, row_rect.Left(), y, nullptr);
+    ::LineTo(dc, row_rect.Right(), y);
   }
 }
 

@@ -13,7 +13,9 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <utility>
 
 #include "renderer/win32/dopagaki_effects.h"
 
@@ -47,6 +49,12 @@ class DopagakiOverlay {
   // overlay.
   D2D1_POINT_2F ScreenToOverlay(POINT point) const;
   DopagakiEffects& effects() { return effects_; }
+  float pixels_per_dip() const { return static_cast<float>(dpi_) / 96.0f; }
+  // Called before each frame is drawn, after the effects are updated. Used to
+  // follow the candidate window and to shake it.
+  void SetFrameCallback(std::function<void()> callback) {
+    frame_callback_ = std::move(callback);
+  }
   // Shows the overlay and draws frames until there is nothing to draw.
   void StartAnimation();
   // Puts the overlay above other topmost windows (e.g. the candidate window).
@@ -76,10 +84,14 @@ class DopagakiOverlay {
   // Fills the band between |inner| and |outer| DIPs from the edges, like a
   // picture frame. |brushes| are for the top, right, bottom and left sides.
   void FillFrame(float outer, float inner, ID2D1Brush* const brushes[4]);
-  // The rainbow of SSS turning around the center (a conic gradient in the
-  // preview), approximated by a linear gradient along each side.
-  wil::com_ptr_nothrow<ID2D1LinearGradientBrush> CreateRainbowBrush(
-      D2D1_POINT_2F from, D2D1_POINT_2F to, double start_angle);
+  // A conic gradient of the preview approximated by a linear gradient along a
+  // side from |from| to |to|. |color_at| returns the color at a point.
+  wil::com_ptr_nothrow<ID2D1LinearGradientBrush> CreateGradientAlong(
+      D2D1_POINT_2F from, D2D1_POINT_2F to,
+      const std::function<DopagakiColor(float x, float y)>& color_at);
+  // The glowing frame and "x42" of the candidate window (phase 4).
+  void DrawCandidateFrame();
+  void UpdateBadgeCache();
   void Hide();
   bool IsHealthy() const;
   void UpdateBannerCache();
@@ -123,6 +135,9 @@ class DopagakiOverlay {
   GlowText banner_text_;
   uint64_t combo_label_cache_id_ = 0;
   GlowText combo_label_text_;
+  uint64_t badge_cache_id_ = 0;
+  GlowText badge_text_;
+  std::function<void()> frame_callback_;
 };
 
 }  // namespace win32

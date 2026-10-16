@@ -34,6 +34,7 @@
 #include <d2d1.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -84,6 +85,7 @@ WindowManager::WindowManager()
 WindowManager::~WindowManager() {}
 
 void WindowManager::Initialize() {
+  dopagaki_overlay_->SetFrameCallback([this] { OnDopagakiFrame(); });
   DCHECK(!main_window_->IsWindow());
   DCHECK(!cascading_window_->IsWindow());
   DCHECK(!infolist_window_->IsWindow());
@@ -303,6 +305,10 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   main_window_->SetWindowPos(HWND_TOPMOST, main_window_rect.Left(),
                              main_window_rect.Top(), main_window_rect.Width(),
                              main_window_rect.Height(), set_windows_pos_flags);
+  // Dopagaki: the position without shaking.
+  dopagaki_main_window_rect_ = main_window_rect;
+  dopagaki_cascading_window_rect_.reset();
+  dopagaki_shake_offset_ = {0, 0};
   // This trick ensures that the window is certainly shown as 'inactivated'
   // in terms of visual effect on DWM-enabled desktop.
   main_window_->SendMessageW(WM_NCACTIVATE, FALSE);
@@ -393,6 +399,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
         HWND_TOPMOST, cascading_window_rect.Left(), cascading_window_rect.Top(),
         cascading_window_rect.Width(), cascading_window_rect.Height(),
         set_windows_pos_flags);
+    dopagaki_cascading_window_rect_ = cascading_window_rect;
     // This trick ensures that the window is certainly shown as 'inactivated'
     // in terms of visual effect on DWM-enabled desktop.
     cascading_window_->SendMessageW(WM_NCACTIVATE, FALSE);
@@ -476,12 +483,13 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
   // the combo label near the caret (K5) when there is no candidate window.
   D2D1_POINT_2F origin = {};
   std::optional<D2D1_POINT_2F> label_position;
-  if (main_window_->IsWindowVisible()) {
-    RECT rect = {};
-    main_window_->GetWindowRect(&rect);
-    const D2D1_POINT_2F corner =
-        dopagaki_overlay_->ScreenToOverlay({rect.right, rect.top});
-    origin = D2D1::Point2F(corner.x - 10, corner.y + 4);
+  const std::optional<DopagakiRect> candidate_rect =
+      GetDopagakiCandidateWindowRect();
+  effects.SetCandidateWindow(candidate_rect);
+  if (candidate_rect.has_value()) {
+    // right - 10, top + 4 of .cand-wrap (3px around the window).
+    origin = D2D1::Point2F(candidate_rect->right + 3 - 10,
+                           candidate_rect->top - 3 + 4);
   } else {
     label_position = GetDopagakiComboLabelPosition(target_window);
     origin = D2D1::Point2F(label_position->x + 40, label_position->y + 12);
@@ -506,16 +514,77 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
         break;
     }
   }
+  const DopagakiRank rank = dopagaki_state_->rank();
   // The edge glow follows the current rank (phase 3).
-  effects.SetEdgeRank(dopagaki_state_->rank());
+  effects.SetEdgeRank(rank);
+  // "x42" on the candidate window pops on every keystroke (phase 4).
+  effects.SetBadge(dopagaki_state_->combo(), rank, /*pop=*/true);
+  main_window_->SetDopagakiRank(rank, effects.hue());
+  cascading_window_->SetDopagakiRank(rank, effects.hue());
   if (label_position.has_value() && dopagaki_state_->combo() > 0) {
-    effects.ShowComboLabel(dopagaki_state_->combo(), dopagaki_state_->rank(),
-                           label_position->x, label_position->y);
+    effects.ShowComboLabel(dopagaki_state_->combo(), rank, label_position->x,
+                           label_position->y);
   } else {
-    // The combo on the candidate window ("x42") comes in phase 4.
+    // With the candidate window, "x42" shows the combo instead.
     effects.HideComboLabel();
   }
   dopagaki_overlay_->StartAnimation();
+}
+
+std::optional<DopagakiRect> WindowManager::GetDopagakiCandidateWindowRect()
+    const {
+  if (!main_window_->IsWindow() || !main_window_->IsWindowVisible() ||
+      !dopagaki_main_window_rect_.has_value()) {
+    return std::nullopt;
+  }
+  // The position without shaking. The overlay shakes the frame by itself.
+  const Rect& rect = *dopagaki_main_window_rect_;
+  const D2D1_POINT_2F top_left =
+      dopagaki_overlay_->ScreenToOverlay({rect.Left(), rect.Top()});
+  const D2D1_POINT_2F bottom_right =
+      dopagaki_overlay_->ScreenToOverlay({rect.Right(), rect.Bottom()});
+  // Windows 11 rounds the corners with a radius of 8 DIPs.
+  return DopagakiRect{
+      .left = top_left.x,
+      .top = top_left.y,
+      .right = bottom_right.x,
+      .bottom = bottom_right.y,
+      .corner_radius = main_window_->dopagaki_rounded_corners() ? 8.0f : 0.0f};
+}
+
+void WindowManager::OnDopagakiFrame() {
+  DopagakiEffects& effects = dopagaki_overlay_->effects();
+  effects.SetCandidateWindow(GetDopagakiCandidateWindowRect());
+
+  // Shake the candidate windows together with the effects. Only our own
+  // windows are moved.
+  const float pixels_per_dip = dopagaki_overlay_->pixels_per_dip();
+  const POINT offset = {std::lround(effects.shake_x() * pixels_per_dip),
+                        std::lround(effects.shake_y() * pixels_per_dip)};
+  if (offset.x != dopagaki_shake_offset_.x ||
+      offset.y != dopagaki_shake_offset_.y) {
+    constexpr UINT kFlags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+    if (dopagaki_main_window_rect_.has_value() && main_window_->IsWindow() &&
+        main_window_->IsWindowVisible()) {
+      main_window_->SetWindowPos(
+          nullptr, dopagaki_main_window_rect_->Left() + offset.x,
+          dopagaki_main_window_rect_->Top() + offset.y, 0, 0, kFlags);
+    }
+    if (dopagaki_cascading_window_rect_.has_value() &&
+        cascading_window_->IsWindow() && cascading_window_->IsWindowVisible()) {
+      cascading_window_->SetWindowPos(
+          nullptr, dopagaki_cascading_window_rect_->Left() + offset.x,
+          dopagaki_cascading_window_rect_->Top() + offset.y, 0, 0, kFlags);
+    }
+    dopagaki_shake_offset_ = offset;
+  }
+
+  // The selected row of SSS follows the turning hue at about 30 fps.
+  if (dopagaki_state_->rank() == DopagakiRank::kSSS &&
+      (++dopagaki_frame_count_ % 2) == 0) {
+    main_window_->SetDopagakiRank(DopagakiRank::kSSS, effects.hue());
+    cascading_window_->SetDopagakiRank(DopagakiRank::kSSS, effects.hue());
+  }
 }
 
 D2D1_POINT_2F WindowManager::GetDopagakiComboLabelPosition(
