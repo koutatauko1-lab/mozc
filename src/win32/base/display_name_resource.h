@@ -36,3 +36,6 @@
 // Synonym of IDS_TEXTSERVICE_DISPLAYNAME to update
 // MUI string cache.  See b/2994558 for details.
 #define IDS_TEXTSERVICE_DISPLAYNAME_SYNONYM 201
+// Dopagaki (K7): "ドパガキIME". A new ID so that Windows does not keep showing
+// the cached "Mozc" for the old ID.
+#define IDS_TEXTSERVICE_DISPLAYNAME_DOPAGAKI 202

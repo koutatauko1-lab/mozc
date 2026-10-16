@@ -186,7 +186,7 @@ TIP とレンダラーの間には、**古い命令を新しい命令で上書�
 | K4 | しばらく打たないとき | **決定**：3秒入力が無ければ、ふちの光・火花・コンボ表示は1秒かけてフェードアウトして消える。コンボの数とランクは保持し、次の1打ですぐ復活。出ている途中の演出（バナー・粒）は最後まで出す | 3 |
 | K5 | 候補ウィンドウが出ていないとき（英字の直接入力など）のコンボ表示 | **決定**：入力位置（カーソル）の近くに「`29 COMBO A`」を出し、2秒で消える（元ネタの動画と同じ雰囲気）。カーソル位置が分からないアプリでは打っているウィンドウの端あたり。粒もここから出す | 2 |
 | K6 | メニューに「ドパガキ演出 ON/OFF」も付けるか | **決定**：付ける（会議中などに一時的に止められるように） | 6 |
-| K7 | IMEの表示名を「ドパガキIME」に変えるか | 変えない（Mozc のまま） | 7 |
+| K7 | IMEの表示名を「ドパガキIME」に変えるか | **決定**：変える。ただし画面に出る名前の2か所だけ：①IME の一覧（Win＋スペース、Windows の設定の「キーボード」一覧）②Windows の設定の「アプリ」一覧。フォルダ名・ファイル名・内部の登録ID（GUID）・設定の保存場所・`kProductNameInEnglish`、プロパティ画面などの中の「Mozc」は変えない（入力を壊さない・設定を消さないため。Mozc の作者表示はライセンス上も残す）。英語の Windows では「Dopagaki IME」 | 7 |
 
 **制約（こーたに説明済みにしておくこと）**：画面の揺れは、自分で描いている演出（粒・バナー・ふち・コンボ表示）と候補ウィンドウにだけかかる。他のアプリの画面そのものは揺らせない（他アプリのウィンドウを動かすのは危険なのでやらない）。
 
@@ -355,7 +355,9 @@ optional DopagakiConfig dopagaki_config = 7000;
 | `win32/tip/tip_dopagaki_sound.{h,cc}`（新規） | 効果音を鳴らす（フェーズ5） |
 | `win32/tip/tip_text_service.cc` | `OnTestKeyDown` と `OnKeyDown` から呼ぶ／`OnMenuSelect` に設定変更 |
 | `win32/tip/tip_lang_bar.cc` / `tip_lang_bar_menu.cc` / `tip_lang_bar_callback.h` | メニュー項目の追加と特別扱い |
-| `win32/tip/tip_resource.h` / `tip_resource.rc` | メニューの文字列 |
+| `win32/tip/tip_resource.h` / `tip_resource.rc` | メニューの文字列／IME の表示名「ドパガキIME」（K7） |
+| `win32/base/display_name_resource.h` / `tsf_profile.cc` / `tsf_registrar.cc` | IME の表示名の文字列ID（新しい ID 202）と登録名（K7） |
+| `win32/installer/installer_oss_64bit.wxs` | 「アプリ」一覧に出る名前（K7） |
 | `renderer/win32/win32_renderer_client.{h,cc}` | `OnDopagakiEvent` と別枠送信 |
 | `renderer/renderer_client.cc` | NOOP で `is_window_visible_` を変えない |
 | `renderer/win32/win32_server.{h,cc}` | ドパガキ専用の受け取り口 |
@@ -625,6 +627,9 @@ jobs:
   - 再起動後の設定ファイル（`LocalLow\Mozc\config1.db`）に `dopagaki_config` が「enabled=1, sound_set=5（メカ）」で保存されていることも確認。
   - こーたから「再起動後、打鍵音だけ少し小さくなった気がする（BackSpace の音は普通）」との声。調べた結果、不具合ではなく**音の種類の違い**：メカの打鍵音はプレビューのレシピどおりで、6種の中でいちばん小さい（最初の30msの音の強さで、ピコピコの打鍵音より約7dB小さい）。逆にメカの BREAK 音はピコピコより約7dB大きい。音の作り方のコードはフェーズ6で変えていない。打鍵音の高さはランクで上がるので、再起動直後（ランクB）はいちばん低く、少し弱く聞こえることもある。
   - こーたの指示で、メカの打鍵音の音量を 0.04 → 0.08（2倍、約+6dB）にした（ピコピコの打鍵音とほぼ同じ強さ）。この変更はフェーズ7の最初のインストーラーに入る。
+- 2026-10-16：**フェーズ7 開始**。K7 はこーたの判断で「変える」（範囲は2か所だけ。3章の表を参照）。
+  - IME の一覧の名前は、TIP の DLL の文字列リソースを Windows が読んで表示している（`SetLanguageProfileDisplayName`）。Windows は古い文字列を覚えていることがあるので、ID 201 の中身を変えるのではなく、新しい ID 202（`IDS_TEXTSERVICE_DISPLAYNAME_DOPAGAKI`）を作ってそちらを登録する。
+  - 「アプリ」一覧の名前は MSI の `Package Name`。`UpgradeCode` は変えないので、上書きインストールはこれまでどおり。
   - タスクバーの「あ」の右クリックメニューの最後に「ドパガキ演出」（チェック付き）と効果音7種（ラジオ）を追加。設定は mozc_server の設定（`dopagaki_config`）に保存されるので、PCを再起動しても残るはず。
   - メニューは `TipLangBarButton::OnClick` が毎回作っているので、そこでチェックを付ける（4.9参照）。入力モードの選択やアイコンには触らない。
   - OFF のときは演出も音も止め、コンボは 0 のまま（ON に戻すと 0 から）。これは仕様に書かれていなかったので、自然な形で決めた。こーたに報告して確認してもらう。

@@ -96,7 +96,7 @@ LANGID TsfProfile::GetLangId() { return kTextServiceLanguage; }
 int TsfProfile::GetIconIndex() { return 0; }
 
 int TsfProfile::GetDescriptionTextIndex() {
-  return IDS_TEXTSERVICE_DISPLAYNAME_SYNONYM;
+  return IDS_TEXTSERVICE_DISPLAYNAME_DOPAGAKI;
 }
 
 }  // namespace win32

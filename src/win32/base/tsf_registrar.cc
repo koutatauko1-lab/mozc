@@ -55,6 +55,9 @@ constexpr wchar_t kTipInfoKeyPrefix[] = L"CLSID\\";
 constexpr wchar_t kTipInProcServer32[] = L"InProcServer32";
 constexpr wchar_t kTipThreadingModel[] = L"ThreadingModel";
 constexpr wchar_t kTipTextServiceModel[] = L"Apartment";
+// Dopagaki (K7): the culture-invariant name of the input profile. Only the
+// shown name changes; the GUIDs, paths and kProductNameInEnglish stay.
+constexpr wchar_t kDopagakiProfileDescription[] = L"Dopagaki IME";
 
 constexpr REGSAM AdjustRegFlagBitness(REGSAM base_flags,
                                       COMServerBitness bitness) {
@@ -206,7 +209,7 @@ HRESULT TsfRegistrar::RegisterProfiles(std::wstring_view resource_dll_path) {
   if (SUCCEEDED(result)) {
     // We use English name here as culture-invariant description.
     // Localized name is specified later by SetLanguageProfileDisplayName.
-    std::wstring description = Utf8ToWide(mozc::kProductNameInEnglish);
+    std::wstring description = kDopagakiProfileDescription;
 
     result = profiles->AddLanguageProfile(
         TsfProfile::GetTextServiceGuid(), TsfProfile::GetLangId(),
