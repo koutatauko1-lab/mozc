@@ -71,6 +71,15 @@ class DopagakiOverlay {
   void OnDeviceFailure();
   void OnTimer();
   bool DrawFrame();
+  // The glow along the edges of the monitor (phase 3).
+  void DrawEdge();
+  // Fills the band between |inner| and |outer| DIPs from the edges, like a
+  // picture frame. |brushes| are for the top, right, bottom and left sides.
+  void FillFrame(float outer, float inner, ID2D1Brush* const brushes[4]);
+  // The rainbow of SSS turning around the center (a conic gradient in the
+  // preview), approximated by a linear gradient along each side.
+  wil::com_ptr_nothrow<ID2D1LinearGradientBrush> CreateRainbowBrush(
+      D2D1_POINT_2F from, D2D1_POINT_2F to, double start_angle);
   void Hide();
   bool IsHealthy() const;
   void UpdateBannerCache();

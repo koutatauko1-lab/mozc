@@ -95,6 +95,17 @@ float GetDopagakiComboLabelOpacity(double age_ms);
 
 DopagakiColor GetDopagakiRankColor(DopagakiRank rank, double hue);
 
+// EDGE in preview.html: the glow along the edges of the monitor.
+struct DopagakiEdgeStyle {
+  float width = 0;  // 0 means no glow.
+  float blur = 0;
+  float alpha = 0;
+  float sparks_per_frame = 0;
+};
+DopagakiEdgeStyle GetDopagakiEdgeStyle(DopagakiRank rank);
+// The glow of SS and SSS pulses. 1 for the other ranks.
+float GetDopagakiEdgePulse(DopagakiRank rank, double edge_time);
+
 class DopagakiEffects {
  public:
   // Returns a number in [0, 1). Replaced in tests.
@@ -103,6 +114,10 @@ class DopagakiEffects {
   static constexpr size_t kMaxParticles = 4000;
   static constexpr double kComboLabelLifetimeMs = 2000;
   static constexpr double kFlashDurationMs = 450;
+  // K4: the edge glow and sparks fade out after this idle time ...
+  static constexpr double kEdgeIdleMs = 3000;
+  // ... in this time.
+  static constexpr double kEdgeFadeMs = 1000;
 
   explicit DopagakiEffects(RandomFunction random);
   DopagakiEffects(const DopagakiEffects&) = delete;
@@ -121,6 +136,8 @@ class DopagakiEffects {
   void OnBreak(float origin_x, float origin_y);
   void ShowComboLabel(uint64_t combo, DopagakiRank rank, float x, float y);
   void HideComboLabel();
+  // The current rank, which decides the edge glow.
+  void SetEdgeRank(DopagakiRank rank);
 
   // Advances all the effects by |elapsed_ms|.
   void Update(double elapsed_ms);
@@ -140,6 +157,12 @@ class DopagakiEffects {
   float shake_y() const { return shake_y_; }
   float shake_amount() const { return shake_amount_; }
   double hue() const { return hue_; }
+  DopagakiRank edge_rank() const { return edge_rank_; }
+  // "t" of drawEdge() in the preview. +0.05 per frame.
+  double edge_time() const { return edge_time_; }
+  // 1 while typing, fades to 0 after kEdgeIdleMs (K4).
+  float edge_opacity() const;
+  bool IsEdgeVisible() const;
 
  private:
   struct BurstOptions {
@@ -152,6 +175,8 @@ class DopagakiEffects {
   };
 
   void Burst(float x, float y, int count, const BurstOptions& options);
+  // Sparks flying inward from random points on the edges.
+  void SpawnEdgeSparks(double frames);
   DopagakiColor GetParticleColor(DopagakiRank rank);
   void StartBanner(DopagakiBannerKind kind, std::wstring text,
                    DopagakiColor color);
@@ -169,6 +194,10 @@ class DopagakiEffects {
   float shake_y_ = 0;
   double hue_ = 0;
   uint64_t next_id_ = 1;
+  DopagakiRank edge_rank_ = DopagakiRank::kB;
+  double edge_time_ = 0;
+  // Time since the last keystroke. Starts as faded out.
+  double idle_ms_ = kEdgeIdleMs + kEdgeFadeMs;
 };
 
 }  // namespace win32

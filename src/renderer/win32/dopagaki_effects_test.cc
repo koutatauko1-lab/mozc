@@ -232,6 +232,118 @@ TEST(DopagakiEffectsTest, ComboLabel) {
   EXPECT_FALSE(effects.combo_label().has_value());
 }
 
+TEST(DopagakiEffectsTest, EdgeStyle) {
+  EXPECT_FLOAT_EQ(GetDopagakiEdgeStyle(DopagakiRank::kB).width, 0);
+  const DopagakiEdgeStyle a = GetDopagakiEdgeStyle(DopagakiRank::kA);
+  EXPECT_FLOAT_EQ(a.width, 3);
+  EXPECT_FLOAT_EQ(a.blur, 14);
+  EXPECT_FLOAT_EQ(a.alpha, 0.45f);
+  EXPECT_FLOAT_EQ(a.sparks_per_frame, 0);
+  const DopagakiEdgeStyle sss = GetDopagakiEdgeStyle(DopagakiRank::kSSS);
+  EXPECT_FLOAT_EQ(sss.width, 13);
+  EXPECT_FLOAT_EQ(sss.blur, 42);
+  EXPECT_FLOAT_EQ(sss.alpha, 1);
+  EXPECT_FLOAT_EQ(sss.sparks_per_frame, 2.2f);
+}
+
+TEST(DopagakiEffectsTest, EdgePulse) {
+  constexpr double kHalfPi = 1.5707963267948966;
+  EXPECT_FLOAT_EQ(GetDopagakiEdgePulse(DopagakiRank::kS, kHalfPi / 2), 1);
+  // sin(t * 2) == 1
+  EXPECT_NEAR(GetDopagakiEdgePulse(DopagakiRank::kSS, kHalfPi / 2), 1.35f,
+              1e-5);
+  // sin(t * 3) == 1
+  EXPECT_NEAR(GetDopagakiEdgePulse(DopagakiRank::kSSS, kHalfPi / 3), 1.35f,
+              1e-5);
+}
+
+TEST(DopagakiEffectsTest, EdgeFadesOutWhenIdle) {
+  DopagakiEffects effects(Fixed(0.9));
+  // Nothing is shown before the first keystroke.
+  effects.SetEdgeRank(DopagakiRank::kA);
+  EXPECT_FALSE(effects.IsEdgeVisible());
+
+  effects.OnKey(DopagakiRank::kA, 100, 100);
+  EXPECT_FLOAT_EQ(effects.edge_opacity(), 1);
+  // Particles are gone after one second, but the edge is still visible.
+  for (int i = 0; i < 60; ++i) {
+    effects.Update(kOneFrameMs);
+  }
+  EXPECT_TRUE(effects.particles().empty());
+  EXPECT_TRUE(effects.IsActive());
+  EXPECT_FLOAT_EQ(effects.edge_opacity(), 1);
+
+  effects.Update(DopagakiEffects::kEdgeIdleMs - 1000);  // 3 seconds idle.
+  EXPECT_FLOAT_EQ(effects.edge_opacity(), 1);
+  effects.Update(500);
+  EXPECT_NEAR(effects.edge_opacity(), 0.5f, 1e-5);
+  effects.Update(500);
+  EXPECT_FLOAT_EQ(effects.edge_opacity(), 0);
+  EXPECT_FALSE(effects.IsActive());
+
+  // The next keystroke brings it back at once.
+  effects.OnKey(DopagakiRank::kA, 100, 100);
+  EXPECT_FLOAT_EQ(effects.edge_opacity(), 1);
+  EXPECT_TRUE(effects.IsEdgeVisible());
+}
+
+TEST(DopagakiEffectsTest, NoEdgeAtRankB) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetEdgeRank(DopagakiRank::kB);
+  effects.OnKey(DopagakiRank::kB, 100, 100);
+  EXPECT_FALSE(effects.IsEdgeVisible());
+}
+
+TEST(DopagakiEffectsTest, EdgeTime) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.Update(kOneFrameMs);
+  effects.Update(kOneFrameMs);
+  EXPECT_NEAR(effects.edge_time(), 0.1, 1e-9);
+}
+
+TEST(DopagakiEffectsTest, EdgeSparks) {
+  // SSS: 2.2 sparks per frame. With 0.9, the 0.2 spark is not spawned.
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetScreenSize(1000, 500);
+  effects.SetEdgeRank(DopagakiRank::kSSS);
+  effects.OnKey(DopagakiRank::kSSS, 100, 100);
+  const size_t key_particles = effects.particles().size();
+  effects.Update(kOneFrameMs);
+  ASSERT_EQ(effects.particles().size(), key_particles + 2);
+  // 0.9 of the perimeter is on the left edge, flying to the right.
+  const DopagakiParticle& spark = effects.particles().back();
+  EXPECT_TRUE(spark.shard);
+  EXPECT_FLOAT_EQ(spark.x, 0);
+  EXPECT_GT(spark.vx, 0);
+
+  // With 0.1, the 0.2 spark is also spawned.
+  DopagakiEffects more(Fixed(0.1));
+  more.SetEdgeRank(DopagakiRank::kSSS);
+  more.OnKey(DopagakiRank::kSSS, 100, 100);
+  const size_t more_key_particles = more.particles().size();
+  more.Update(kOneFrameMs);
+  EXPECT_EQ(more.particles().size(), more_key_particles + 3);
+}
+
+TEST(DopagakiEffectsTest, FewerEdgeSparksWithReducedMotion) {
+  // 2.2 * 0.3 = 0.66 sparks per frame.
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetReducedMotion(true);
+  effects.SetEdgeRank(DopagakiRank::kSSS);
+  effects.OnKey(DopagakiRank::kSSS, 100, 100);
+  const size_t key_particles = effects.particles().size();
+  effects.Update(kOneFrameMs);
+  EXPECT_EQ(effects.particles().size(), key_particles);
+
+  DopagakiEffects lucky(Fixed(0.5));
+  lucky.SetReducedMotion(true);
+  lucky.SetEdgeRank(DopagakiRank::kSSS);
+  lucky.OnKey(DopagakiRank::kSSS, 100, 100);
+  const size_t lucky_key_particles = lucky.particles().size();
+  lucky.Update(kOneFrameMs);
+  EXPECT_EQ(lucky.particles().size(), lucky_key_particles + 1);
+}
+
 TEST(DopagakiEffectsTest, ParticlesAreLimited) {
   DopagakiEffects effects(Fixed(0.9));
   for (int i = 0; i < 100; ++i) {

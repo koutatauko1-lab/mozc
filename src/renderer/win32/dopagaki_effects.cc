@@ -231,6 +231,33 @@ DopagakiColor GetDopagakiRankColor(DopagakiRank rank, double hue) {
   return DopagakiColorFromRgb(0x4DA3FF);
 }
 
+DopagakiEdgeStyle GetDopagakiEdgeStyle(DopagakiRank rank) {
+  switch (rank) {
+    case DopagakiRank::kB:
+      return {};
+    case DopagakiRank::kA:
+      return {.width = 3, .blur = 14, .alpha = 0.45f};
+    case DopagakiRank::kS:
+      return {.width = 6, .blur = 22, .alpha = 0.7f, .sparks_per_frame = 0.06f};
+    case DopagakiRank::kSS:
+      return {.width = 9, .blur = 30, .alpha = 0.85f, .sparks_per_frame = 0.6f};
+    case DopagakiRank::kSSS:
+      return {.width = 13, .blur = 42, .alpha = 1, .sparks_per_frame = 2.2f};
+  }
+  return {};
+}
+
+float GetDopagakiEdgePulse(DopagakiRank rank, double edge_time) {
+  switch (rank) {
+    case DopagakiRank::kSS:
+      return static_cast<float>(1 + 0.35 * std::sin(edge_time * 2));
+    case DopagakiRank::kSSS:
+      return static_cast<float>(1 + 0.35 * std::sin(edge_time * 3));
+    default:
+      return 1;
+  }
+}
+
 DopagakiEffects::DopagakiEffects(RandomFunction random)
     : random_(std::move(random)) {}
 
@@ -251,11 +278,28 @@ void DopagakiEffects::Clear() {
   shake_amount_ = 0;
   shake_x_ = 0;
   shake_y_ = 0;
+  edge_rank_ = DopagakiRank::kB;
+  idle_ms_ = kEdgeIdleMs + kEdgeFadeMs;
+}
+
+void DopagakiEffects::SetEdgeRank(DopagakiRank rank) { edge_rank_ = rank; }
+
+float DopagakiEffects::edge_opacity() const {
+  if (idle_ms_ <= kEdgeIdleMs) {
+    return 1;
+  }
+  return static_cast<float>(
+      std::max(0.0, 1 - (idle_ms_ - kEdgeIdleMs) / kEdgeFadeMs));
+}
+
+bool DopagakiEffects::IsEdgeVisible() const {
+  return GetDopagakiEdgeStyle(edge_rank_).width > 0 && edge_opacity() > 0;
 }
 
 // hit() in preview.html.
 void DopagakiEffects::OnKey(DopagakiRank rank, float origin_x,
                             float origin_y) {
+  idle_ms_ = 0;
   const int r = RankIndex(rank);
   Burst(origin_x, origin_y, kRankBurst[r],
         {.speed = 4 + r * 1.6f, .size = 2.5f + r * 0.6f, .rank = rank});
@@ -284,6 +328,7 @@ void DopagakiEffects::OnRankUp(DopagakiRank rank) {
 
 // breakCombo() in preview.html.
 void DopagakiEffects::OnBreak(float origin_x, float origin_y) {
+  idle_ms_ = 0;
   Burst(origin_x, origin_y, 60,
         {.speed = 10,
          .size = 5,
@@ -366,12 +411,71 @@ void DopagakiEffects::Update(double elapsed_ms) {
     shake_y_ = 0;
     shake_amount_ = 0;
   }
+
+  // drawEdge() in preview.html. New sparks move from the next frame.
+  edge_time_ += 0.05 * frames;
+  idle_ms_ = std::min(idle_ms_ + elapsed_ms, kEdgeIdleMs + kEdgeFadeMs);
+  SpawnEdgeSparks(frames);
 }
 
 bool DopagakiEffects::IsActive() const {
   return !particles_.empty() || banner_.has_value() ||
          combo_label_.has_value() || flash_opacity() > 0 ||
-         shake_amount_ > 0.2f;
+         shake_amount_ > 0.2f || IsEdgeVisible();
+}
+
+void DopagakiEffects::SpawnEdgeSparks(double frames) {
+  if (!IsEdgeVisible()) {
+    return;
+  }
+  // Fewer sparks when the Windows animation setting is off, and they fade out
+  // with the glow (K4).
+  double count = GetDopagakiEdgeStyle(edge_rank_).sparks_per_frame * frames *
+                 (reduced_motion_ ? 0.3 : 1.0) * edge_opacity();
+  const int r = RankIndex(edge_rank_);
+  while (count > 0 && particles_.size() < kMaxParticles) {
+    // A fraction of a spark is spawned with that probability.
+    if (count < 1 && random_() > count) {
+      break;
+    }
+    // edgePoint(): a random point on the edges and the inward direction.
+    const double perimeter = 2.0 * (width_ + height_);
+    const double d = random_() * perimeter;
+    float x = 0;
+    float y = 0;
+    float nx = 0;
+    float ny = 0;
+    if (d < width_) {
+      x = static_cast<float>(d);
+      ny = 1;
+    } else if (d < width_ + height_) {
+      x = width_;
+      y = static_cast<float>(d - width_);
+      nx = -1;
+    } else if (d < 2.0 * width_ + height_) {
+      x = static_cast<float>(d - width_ - height_);
+      y = height_;
+      ny = -1;
+    } else {
+      y = static_cast<float>(d - 2.0 * width_ - height_);
+      nx = 1;
+    }
+    const float speed = static_cast<float>(4 + random_() * (4 + r * 2));
+    const float spread = static_cast<float>((random_() - 0.5) * 1.4);
+    DopagakiParticle p;
+    p.x = x;
+    p.y = y;
+    p.vx = nx * speed + (ny != 0 ? spread * speed : 0);
+    p.vy = ny * speed + (nx != 0 ? spread * speed : 0) - 1;
+    p.life = 1;
+    p.decay = static_cast<float>(0.025 + random_() * 0.03);
+    p.size = static_cast<float>(1.5 + random_() * 2);
+    p.color = GetParticleColor(edge_rank_);
+    p.shard = true;
+    p.rotation = std::atan2(ny, nx);
+    particles_.push_back(p);
+    count -= 1;
+  }
 }
 
 float DopagakiEffects::flash_opacity() const {

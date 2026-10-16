@@ -484,6 +484,7 @@ bool DopagakiOverlay::DrawFrame() {
           brush_.get());
     }
   }
+  DrawEdge();
   context_->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
 
   // K5: "29 COMBO A".
@@ -546,6 +547,138 @@ bool DopagakiOverlay::DrawFrame() {
     return false;
   }
   return true;
+}
+
+void DopagakiOverlay::DrawEdge() {
+  if (!effects_.IsEdgeVisible()) {
+    return;
+  }
+  const DopagakiRank rank = effects_.edge_rank();
+  const DopagakiEdgeStyle style = GetDopagakiEdgeStyle(rank);
+  const float opacity = effects_.edge_opacity();
+  const float pulse = GetDopagakiEdgePulse(rank, effects_.edge_time());
+  const float line = style.width * pulse;
+  const float glow = style.blur * pulse;
+  const bool rainbow = (rank == DopagakiRank::kSSS);
+  context_->SetTransform(
+      D2D1::Matrix3x2F::Translation(effects_.shake_x(), effects_.shake_y()));
+
+  // The glow (shadowBlur of the canvas), drawn as bands fading out inward.
+  const DopagakiColor glow_color =
+      rainbow ? DopagakiColorFromHsl(effects_.hue(), 1, 0.6)
+              : GetDopagakiRankColor(rank, effects_.hue());
+  brush_->SetColor(ToD2DColor(glow_color, 1));
+  ID2D1Brush* const solid[4] = {brush_.get(), brush_.get(), brush_.get(),
+                                brush_.get()};
+  constexpr int kBands = 16;
+  const float sigma = std::max(glow / 2, 1.0f);
+  for (int i = 0; i < kBands; ++i) {
+    const float outer = line + glow * i / kBands;
+    const float inner = line + glow * (i + 1) / kBands;
+    const float x = (outer + inner) / 2 - line;
+    brush_->SetOpacity(style.alpha * 0.7f * opacity *
+                       std::exp(-x * x / (2 * sigma * sigma)));
+    FillFrame(outer, inner, solid);
+  }
+
+  // The lines. SSS uses the turning rainbow.
+  ID2D1Brush* line_brushes[4] = {brush_.get(), brush_.get(), brush_.get(),
+                                 brush_.get()};
+  wil::com_ptr_nothrow<ID2D1LinearGradientBrush> rainbow_brushes[4];
+  if (rainbow) {
+    const float width = effects_.width();
+    const float height = effects_.height();
+    const double start_angle = effects_.edge_time();
+    rainbow_brushes[0] = CreateRainbowBrush(D2D1::Point2F(0, 0),
+                                            D2D1::Point2F(width, 0),
+                                            start_angle);  // Top.
+    rainbow_brushes[1] = CreateRainbowBrush(D2D1::Point2F(width, 0),
+                                            D2D1::Point2F(width, height),
+                                            start_angle);  // Right.
+    rainbow_brushes[2] = CreateRainbowBrush(D2D1::Point2F(0, height),
+                                            D2D1::Point2F(width, height),
+                                            start_angle);  // Bottom.
+    rainbow_brushes[3] = CreateRainbowBrush(D2D1::Point2F(0, 0),
+                                            D2D1::Point2F(0, height),
+                                            start_angle);  // Left.
+    for (int i = 0; i < 4; ++i) {
+      if (rainbow_brushes[i]) {
+        line_brushes[i] = rainbow_brushes[i].get();
+      }
+    }
+  } else {
+    brush_->SetColor(ToD2DColor(GetDopagakiRankColor(rank, 0), 1));
+  }
+  const auto set_opacity = [&line_brushes](float value) {
+    for (ID2D1Brush* brush : line_brushes) {
+      brush->SetOpacity(value);
+    }
+  };
+  // The outer line: a stroke of width 2 * |line| on the border of the screen.
+  // It also extends outside so that shaking does not show a gap.
+  set_opacity(style.alpha * opacity);
+  FillFrame(-40, line, line_brushes);
+  // The inner line: width 0.8 * |line|, 0.6 * |line| inside.
+  set_opacity(std::min(1.0f, style.alpha + 0.2f) * opacity);
+  FillFrame(line * 0.2f, line, line_brushes);
+  brush_->SetOpacity(1);
+}
+
+void DopagakiOverlay::FillFrame(float outer, float inner,
+                                ID2D1Brush* const brushes[4]) {
+  if (inner <= outer) {
+    return;
+  }
+  const float width = effects_.width();
+  const float height = effects_.height();
+  // The corners belong to the top and bottom sides so that nothing overlaps.
+  context_->FillRectangle(D2D1::RectF(outer, outer, width - outer, inner),
+                          brushes[0]);
+  context_->FillRectangle(
+      D2D1::RectF(width - inner, inner, width - outer, height - inner),
+      brushes[1]);
+  context_->FillRectangle(
+      D2D1::RectF(outer, height - inner, width - outer, height - outer),
+      brushes[2]);
+  context_->FillRectangle(D2D1::RectF(outer, inner, inner, height - inner),
+                          brushes[3]);
+}
+
+wil::com_ptr_nothrow<ID2D1LinearGradientBrush>
+DopagakiOverlay::CreateRainbowBrush(D2D1_POINT_2F from, D2D1_POINT_2F to,
+                                    double start_angle) {
+  constexpr int kStops = 13;
+  constexpr double kTwoPi = 2 * 3.14159265358979323846;
+  const float center_x = effects_.width() / 2;
+  const float center_y = effects_.height() / 2;
+  D2D1_GRADIENT_STOP stops[kStops] = {};
+  for (int i = 0; i < kStops; ++i) {
+    const float t = static_cast<float>(i) / (kStops - 1);
+    const float x = from.x + (to.x - from.x) * t;
+    const float y = from.y + (to.y - from.y) * t;
+    // createConicGradient(startAngle, cx, cy) with hsl(k * 60) at k / 6.
+    double angle =
+        std::fmod(std::atan2(y - center_y, x - center_x) - start_angle, kTwoPi);
+    if (angle < 0) {
+      angle += kTwoPi;
+    }
+    const DopagakiColor color =
+        DopagakiColorFromHsl(angle / kTwoPi * 360, 1, 0.6);
+    stops[i] = {t, ToD2DColor(color, 1)};
+  }
+  // Called through ID2D1RenderTarget because ID2D1DeviceContext has another
+  // CreateGradientStopCollection.
+  ID2D1RenderTarget* const render_target = context_.get();
+  wil::com_ptr_nothrow<ID2D1GradientStopCollection> collection;
+  wil::com_ptr_nothrow<ID2D1LinearGradientBrush> brush;
+  if (FAILED(render_target->CreateGradientStopCollection(stops, kStops,
+                                                         collection.put())) ||
+      FAILED(render_target->CreateLinearGradientBrush(
+          D2D1::LinearGradientBrushProperties(from, to), collection.get(),
+          brush.put()))) {
+    return nullptr;
+  }
+  return brush;
 }
 
 void DopagakiOverlay::UpdateBannerCache() {

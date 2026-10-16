@@ -506,6 +506,8 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
         break;
     }
   }
+  // The edge glow follows the current rank (phase 3).
+  effects.SetEdgeRank(dopagaki_state_->rank());
   if (label_position.has_value() && dopagaki_state_->combo() > 0) {
     effects.ShowComboLabel(dopagaki_state_->combo(), dopagaki_state_->rank(),
                            label_position->x, label_position->y);
