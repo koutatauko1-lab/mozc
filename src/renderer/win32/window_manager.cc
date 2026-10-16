@@ -458,6 +458,8 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
   const std::vector<DopagakiAction> actions =
       dopagaki_state_->OnEvent(event, absl::Now());
   if (actions.empty()) {
+    // TEMPORARY (phase 1)
+    ::OutputDebugStringW(L"[dopagaki] renderer event without actions\n");
     return;
   }
   bool broke = false;

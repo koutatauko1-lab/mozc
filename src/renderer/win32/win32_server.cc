@@ -153,6 +153,8 @@ bool Win32Server::AsyncExecCommand(absl::string_view proto_message) {
       command.ParseFromArray(proto_message.data(),
                              static_cast<int>(proto_message.size())) &&
       command.has_dopagaki()) {
+    // TEMPORARY (phase 1)
+    ::OutputDebugStringW(L"[dopagaki] renderer received\n");
     {
       absl::MutexLock l(&dopagaki_mutex_);
       AddDopagakiEventLocked(command.dopagaki());

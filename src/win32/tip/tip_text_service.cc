@@ -807,6 +807,8 @@ class TipTextServiceImpl
       eaten = &dummy_eaten;
     }
     *eaten = FALSE;
+    // Dopagaki: count the keystroke. This never affects |eaten|.
+    TipDopagaki::OnKeyDown(this, context, wparam, lparam);
     return TipKeyeventHandler::OnKeyDown(this, context, wparam, lparam, eaten);
   }
   STDMETHODIMP OnKeyUp(ITfContext* context, WPARAM wparam, LPARAM lparam,

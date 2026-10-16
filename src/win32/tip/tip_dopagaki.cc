@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
@@ -39,13 +40,34 @@ constexpr UINT kVkImeOff = 0x1A;
 constexpr UINT kVkDbeFirst = 0xF0;
 constexpr UINT kVkDbeLast = 0xF6;
 
+// A keystroke reported again within this time is treated as the same one.
+constexpr int64_t kSameKeystrokeMicroseconds = 50000;
+// ... and within this time if the message time is also the same.
+constexpr int64_t kSameMessageMicroseconds = 1000000;
+
+enum class KeyRoute { kTestKeyDown, kKeyDown };
+
+// A keystroke counted recently. Used to count a keystroke reported by both
+// OnTestKeyDown and OnKeyDown only once.
+struct RecentKey {
+  uint64_t signature = 0;  // wparam, lparam and thread. 0 means empty.
+  LONG message_time = 0;
+  int64_t microseconds = 0;
+};
+
+// Everything below is guarded by |g_lock|. The lock is held only for a few
+// arithmetic operations.
+SRWLOCK g_lock = SRWLOCK_INIT;
 // Counters of this process (one set per loaded TIP DLL).
-std::atomic<uint64_t> g_key_count = 0;
-std::atomic<uint64_t> g_break_count = 0;
-std::atomic<uint64_t> g_keys_since_break = 0;
-// Signature of the last counted key event, used to drop duplicated calls of
-// OnTestKeyDown for the same physical keystroke.
-std::atomic<uint64_t> g_last_key_signature = 0;
+uint64_t g_key_count = 0;
+uint64_t g_break_count = 0;
+uint64_t g_keys_since_break = 0;
+RecentKey g_recent_keys[8];
+size_t g_recent_key_index = 0;
+
+// TEMPORARY (phase 1): whether each route has been called at least once.
+std::atomic<bool> g_test_key_down_reached = false;
+std::atomic<bool> g_key_down_reached = false;
 
 // SplitMix64. Used only to mix bits.
 uint64_t Mix(uint64_t x) {
@@ -71,8 +93,43 @@ uint64_t GetSessionId() {
 uint64_t GetKeySignature(WPARAM wparam, LPARAM lparam) {
   uint64_t signature = Mix(static_cast<uint64_t>(wparam));
   signature = Mix(signature ^ static_cast<uint32_t>(lparam));
-  signature = Mix(signature ^ static_cast<uint32_t>(::GetMessageTime()));
-  return Mix(signature ^ ::GetCurrentThreadId());
+  signature = Mix(signature ^ ::GetCurrentThreadId());
+  return signature == 0 ? 1 : signature;
+}
+
+int64_t GetMicroseconds() {
+  static const int64_t frequency = [] {
+    LARGE_INTEGER value = {};
+    ::QueryPerformanceFrequency(&value);
+    return value.QuadPart > 0 ? value.QuadPart : 1;
+  }();
+  LARGE_INTEGER counter = {};
+  ::QueryPerformanceCounter(&counter);
+  return counter.QuadPart / frequency * 1000000 +
+         counter.QuadPart % frequency * 1000000 / frequency;
+}
+
+// Returns true if this keystroke was already counted. Otherwise remembers it.
+// Must be called with |g_lock| held.
+bool IsCountedKeystrokeLocked(uint64_t signature, LONG message_time,
+                              int64_t microseconds) {
+  for (const RecentKey& recent : g_recent_keys) {
+    if (recent.signature != signature) {
+      continue;
+    }
+    // The same WM_KEYDOWN reported twice has the same message time. The time
+    // window is a fallback for applications whose message time is not
+    // updated.
+    const int64_t elapsed = microseconds - recent.microseconds;
+    if (elapsed < kSameKeystrokeMicroseconds ||
+        (recent.message_time == message_time &&
+         elapsed < kSameMessageMicroseconds)) {
+      return true;
+    }
+  }
+  g_recent_keys[g_recent_key_index] = {signature, message_time, microseconds};
+  g_recent_key_index = (g_recent_key_index + 1) % std::size(g_recent_keys);
+  return false;
 }
 
 // K3: keys that are never counted.
@@ -134,25 +191,44 @@ HWND GetTargetWindow(ITfContext* context) {
   return ::GetForegroundWindow();
 }
 
+const wchar_t* GetRouteName(KeyRoute route) {
+  return route == KeyRoute::kTestKeyDown ? L"test" : L"key";
+}
+
 // Writes a log for DebugView. Never write what was typed here.
-void DebugLog(const DopagakiEvent& event, const wchar_t* what) {
+void DebugLog(const DopagakiEvent& event, KeyRoute route, bool is_break) {
   wchar_t buffer[160] = {};
   ::swprintf_s(buffer, std::size(buffer),
-               L"[dopagaki] tip %ls keys=%llu breaks=%llu since=%llu\n", what,
+               L"[dopagaki] tip %ls via=%ls keys=%llu breaks=%llu since=%llu\n",
+               is_break ? L"break" : L"key", GetRouteName(route),
                static_cast<unsigned long long>(event.key_count()),
                static_cast<unsigned long long>(event.break_count()),
                static_cast<unsigned long long>(event.keys_since_break()));
   ::OutputDebugStringW(buffer);
 }
 
-}  // namespace
+// TEMPORARY (phase 1): logs once per process that |route| is used.
+void LogFirstCall(KeyRoute route) {
+  std::atomic<bool>& reached = route == KeyRoute::kTestKeyDown
+                                   ? g_test_key_down_reached
+                                   : g_key_down_reached;
+  if (reached.exchange(true)) {
+    return;
+  }
+  wchar_t buffer[96] = {};
+  ::swprintf_s(buffer, std::size(buffer),
+               L"[dopagaki] tip first call via=%ls pid=%lu\n",
+               GetRouteName(route),
+               static_cast<unsigned long>(::GetCurrentProcessId()));
+  ::OutputDebugStringW(buffer);
+}
 
-void TipDopagaki::OnTestKeyDown(TipTextService* text_service,
-                                ITfContext* context, WPARAM wparam,
-                                LPARAM lparam) {
+void CountKeyDown(TipTextService* text_service, ITfContext* context,
+                  WPARAM wparam, LPARAM lparam, KeyRoute route) {
   if (text_service == nullptr) {
     return;
   }
+  LogFirstCall(route);
   // K1: bit 30 is set when the key was already down (auto-repeat).
   if ((static_cast<uint32_t>(lparam) & (1u << 30)) != 0) {
     return;
@@ -162,30 +238,54 @@ void TipDopagaki::OnTestKeyDown(TipTextService* text_service,
     return;
   }
   if (IsPrivateContext(text_service, context)) {
-    return;
-  }
-  const uint64_t signature = GetKeySignature(wparam, lparam);
-  if (g_last_key_signature.exchange(signature) == signature) {
-    ::OutputDebugStringW(L"[dopagaki] tip duplicated key event skipped\n");
+    ::OutputDebugStringW(L"[dopagaki] tip skipped: private context\n");
     return;
   }
 
+  const uint64_t signature = GetKeySignature(wparam, lparam);
+  const LONG message_time = ::GetMessageTime();
+  const int64_t microseconds = GetMicroseconds();
+  const bool is_break = (vk == VK_BACK);
   DopagakiEvent event;
-  event.set_session_id(GetSessionId());
-  if (vk == VK_BACK) {
-    g_keys_since_break = 0;
-    event.set_break_count(++g_break_count);
-    event.set_key_count(g_key_count.load());
-    event.set_keys_since_break(0);
-  } else {
-    event.set_key_count(++g_key_count);
-    event.set_keys_since_break(++g_keys_since_break);
-    event.set_break_count(g_break_count.load());
+  {
+    ::AcquireSRWLockExclusive(&g_lock);
+    const bool counted =
+        IsCountedKeystrokeLocked(signature, message_time, microseconds);
+    if (!counted) {
+      if (is_break) {
+        ++g_break_count;
+        g_keys_since_break = 0;
+      } else {
+        ++g_key_count;
+        ++g_keys_since_break;
+      }
+      event.set_key_count(g_key_count);
+      event.set_break_count(g_break_count);
+      event.set_keys_since_break(g_keys_since_break);
+    }
+    ::ReleaseSRWLockExclusive(&g_lock);
+    if (counted) {
+      return;
+    }
   }
+  event.set_session_id(GetSessionId());
   event.set_target_window_handle(
       WinUtil::EncodeWindowHandle(GetTargetWindow(context)));
-  DebugLog(event, vk == VK_BACK ? L"break" : L"key");
+  DebugLog(event, route, is_break);
   Win32RendererClient::OnDopagakiEvent(event);
+}
+
+}  // namespace
+
+void TipDopagaki::OnTestKeyDown(TipTextService* text_service,
+                                ITfContext* context, WPARAM wparam,
+                                LPARAM lparam) {
+  CountKeyDown(text_service, context, wparam, lparam, KeyRoute::kTestKeyDown);
+}
+
+void TipDopagaki::OnKeyDown(TipTextService* text_service, ITfContext* context,
+                            WPARAM wparam, LPARAM lparam) {
+  CountKeyDown(text_service, context, wparam, lparam, KeyRoute::kKeyDown);
 }
 
 }  // namespace tsf

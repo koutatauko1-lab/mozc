@@ -16,6 +16,10 @@ namespace tsf {
 // Counts keystrokes and sends the cumulative counters to the renderer.
 // Everything here is best effort: it never blocks, never throws and never
 // changes how the key event itself is handled.
+//
+// Depending on the application, TSF calls OnTestKeyDown and OnKeyDown, or
+// only OnKeyDown, for one keystroke. Both are hooked and a keystroke seen by
+// both is counted only once.
 class TipDopagaki {
  public:
   TipDopagaki() = delete;
@@ -26,6 +30,10 @@ class TipDopagaki {
   // |context| may be nullptr.
   static void OnTestKeyDown(TipTextService* text_service, ITfContext* context,
                             WPARAM wparam, LPARAM lparam);
+  // Must be called at the beginning of ITfKeyEventSink::OnKeyDown.
+  // |context| may be nullptr.
+  static void OnKeyDown(TipTextService* text_service, ITfContext* context,
+                        WPARAM wparam, LPARAM lparam);
 };
 
 }  // namespace tsf
