@@ -72,6 +72,7 @@ const POINT kInvalidMousePosition = {-65535, -65535};
 WindowManager::WindowManager()
     : dopagaki_state_(std::make_unique<DopagakiState>()),
       dopagaki_overlay_(std::make_unique<DopagakiOverlay>()),
+      dopagaki_sound_(std::make_unique<DopagakiSound>()),
       main_window_(std::make_unique<CandidateWindow>()),
       cascading_window_(std::make_unique<CandidateWindow>()),
       indicator_window_(std::make_unique<IndicatorWindow>()),
@@ -123,6 +124,7 @@ void WindowManager::DestroyAllWindows() {
     infolist_window_->DestroyWindow();
   }
   dopagaki_overlay_->Destroy();
+  dopagaki_sound_->Shutdown();
 }
 
 void WindowManager::HideAllWindows() {
@@ -471,6 +473,23 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
   if (actions.empty()) {
     return;
   }
+
+  // Sound (phase 5): one sound per event. A keystroke that raised the rank
+  // plays the rank-up sound instead of the key sound. BREAK also plays when
+  // the combo was already 0.
+  DopagakiSoundKind sound_kind = DopagakiSoundKind::kKey;
+  for (const DopagakiAction& action : actions) {
+    if (action.type == DopagakiAction::Type::kRankUp) {
+      sound_kind = DopagakiSoundKind::kRankUp;
+      break;
+    }
+    if (action.type == DopagakiAction::Type::kBreak) {
+      sound_kind = DopagakiSoundKind::kBreak;
+    }
+  }
+  dopagaki_sound_->Play(dopagaki_sound_set_, sound_kind,
+                        dopagaki_state_->rank());
+
   const HWND target_window =
       WinUtil::DecodeWindowHandle(event.target_window_handle());
   if (!dopagaki_overlay_->Prepare(target_window)) {

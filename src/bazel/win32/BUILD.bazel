@@ -141,3 +141,8 @@ mozc_win32_lib(
 mozc_win32_lib(
     name = "user32",
 )
+
+# Dopagaki: sound effects.
+mozc_win32_lib(
+    name = "xaudio2",
+)

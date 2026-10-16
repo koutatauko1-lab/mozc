@@ -289,6 +289,8 @@ mozc_cc_library(
         ":candidate_window",
         ":dopagaki_effects",
         ":dopagaki_overlay",
+        ":dopagaki_sound",
+        ":dopagaki_sound_synth",
         ":dopagaki_state",
         ":indicator_window",
         ":infolist_window",
@@ -352,6 +354,44 @@ mozc_cc_test(
         ":dopagaki_effects",
         ":dopagaki_state",
         "//testing:gunit_main",
+    ],
+)
+
+# Dopagaki: sound effects as samples. No Windows API is used.
+mozc_cc_library(
+    name = "dopagaki_sound_synth",
+    srcs = ["dopagaki_sound_synth.cc"],
+    hdrs = ["dopagaki_sound_synth.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["//protocol:config_cc_proto"],
+)
+
+mozc_cc_test(
+    name = "dopagaki_sound_synth_test",
+    srcs = ["dopagaki_sound_synth_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY + ["dopagaki"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_sound_synth",
+        "//protocol:config_cc_proto",
+        "//testing:gunit_main",
+    ],
+)
+
+# Dopagaki: plays the sound effects with XAudio2.
+mozc_cc_library(
+    name = "dopagaki_sound",
+    srcs = ["dopagaki_sound.cc"],
+    hdrs = ["dopagaki_sound.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_sound_synth",
+        ":dopagaki_state",
+        "//bazel/win32:xaudio2",
+        "//protocol:config_cc_proto",
+        "@com_microsoft_wil//:wil",
     ],
 )
 

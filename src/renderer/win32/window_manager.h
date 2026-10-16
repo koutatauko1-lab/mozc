@@ -40,6 +40,8 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/dopagaki_overlay.h"
+#include "renderer/win32/dopagaki_sound.h"
+#include "renderer/win32/dopagaki_sound_synth.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
@@ -80,6 +82,10 @@ class WindowManager {
 
   std::unique_ptr<DopagakiState> dopagaki_state_;
   std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;
+  std::unique_ptr<DopagakiSound> dopagaki_sound_;
+  // Chosen from the menu in phase 6. PICO by default.
+  DopagakiSoundSet dopagaki_sound_set_ =
+      config::Config::DopagakiConfig::PICO;
   // The positions of the candidate windows without shaking.
   std::optional<Rect> dopagaki_main_window_rect_;
   std::optional<Rect> dopagaki_cascading_window_rect_;
