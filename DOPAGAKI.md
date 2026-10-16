@@ -197,7 +197,7 @@ TIP とレンダラーの間には、**古い命令を新しい命令で上書�
 ```
 [アプリ内 TIP]                                         [mozc_renderer.exe]
  TipDopagaki（新規）                                    Win32Server
-  ・OnTestKeyDown で打鍵を数える                         ├ ドパガキ専用の受け取り口（新規）
+  ・OnTestKeyDown/OnKeyDown で打鍵を数える               ├ ドパガキ専用の受け取り口（新規）
   ・累積カウンタを持つ                                    │    └ UIスレッドへ通知
   ・設定変更をメニューから受ける                          ├ DopagakiState（新規）：差分→コンボ・ランク・イベント
         │                                                ├ WindowManager（既存）：候補ウィンドウの位置を共有
@@ -247,13 +247,13 @@ optional DopagakiConfig dopagaki_config = 7000;
 
 ### 4.2 TIP 側：打鍵を数える（新規 `win32/tip/tip_dopagaki.{h,cc}`）
 
-- `TipTextServiceImpl::OnTestKeyDown`（`tip_text_service.cc`）の先頭で `TipDopagaki::OnTestKeyDown(context, wparam, lparam)` を呼び、それから既存の `TipKeyeventHandler::OnTestKeyDown` に進む。**`eaten` の結果には一切影響させない。**
-  - `OnTestKeyDown` で数える理由：IME がオフ（直接入力）のときやアプリにそのまま渡すキーでは `OnKeyDown` が呼ばれないことがある。`OnTestKeyDown` はどの場合も呼ばれる想定（既存コードも IME オフ時の処理を持っている）。直接入力モードでも呼ばれることを、フェーズ1で実機のログで確かめること。
-- 同じキーを二重に数えない工夫：アプリによっては同じ打鍵で `OnTestKeyDown` が2回以上呼ばれる。`(wparam, lparam, ::GetMessageTime())` が直前に数えたものと同じなら数えない。（実機でログを出して確かめること。）
+- `TipTextServiceImpl::OnTestKeyDown` と `OnKeyDown`（`tip_text_service.cc`）の**両方**の先頭で `TipDopagaki::OnTestKeyDown` / `TipDopagaki::OnKeyDown` を呼び、それから既存の処理に進む。**`eaten` の結果には一切影響させない。**
+  - **フェーズ1で判明**：メモ帳（Windows 11）と Brave では `OnTestKeyDown` が一度も呼ばれず、`OnKeyDown` だけが呼ばれた。最初は `OnTestKeyDown` だけで数えていたため、まったく数えられなかった。アプリによっては両方呼ばれる可能性があるので、両方で数えて重複を除く。
+- 同じキーを二重に数えない工夫：`(wparam, lparam, スレッド)` が直近8件のどれかと同じで、「50ms 以内」または「`::GetMessageTime()` が同じで1秒以内」なら同じ打鍵とみなす（`tip_dopagaki.cc` の `IsCountedKeystrokeLocked`）。メモ帳では1打が1回だけ数えられることをログで確認済み。
 - オートリピートは `lparam` の bit30（直前にキーが押されていた）で判定して数えない（K1）。
-- パスワード欄など IME が無効な入力欄は `TipStatus::IsDisabledContext(context)` で判定して数えない（K2）。
+- パスワード欄など：`TipStatus::IsDisabledContext(context)` か、入力欄の InputScope に `IS_PASSWORD` があれば数えない（K2）。InputScope は `TipInputModeManager::input_scope()`（getter を1行追加）から読む。
 - 数えないキーは K3 のとおり。`VK_BACK` は「BREAK」として `break_count` を +1、`keys_since_break` を 0 に。
-- カウンタはプロセス全体で1組（`std::atomic` でよい）。数えたら `Win32RendererClient::OnDopagakiEvent(...)` を呼ぶ。
+- カウンタはプロセス全体で1組（SRWLOCK で守る。持つのは数行の計算の間だけ）。数えたら `Win32RendererClient::OnDopagakiEvent(...)` を呼ぶ。
 - `target_window_handle` は、フォーカスのある `ITfContext` のビューから取れる HWND（`FillMozcContextCommon` と同じ方法）か、取れなければ `::GetForegroundWindow()`。
 - **キー処理の中で重い処理や待ち合わせをしない。** 値をセットして送信スレッドに知らせるだけにする。
 
@@ -344,7 +344,7 @@ optional DopagakiConfig dopagaki_config = 7000;
 | `protocol/renderer_command.proto` | `DopagakiEvent` と `dopagaki = 1000` を追加 |
 | `protocol/config.proto` | `DopagakiConfig` と `dopagaki_config = 7000` を追加 |
 | `win32/tip/tip_dopagaki.{h,cc}`（新規） | 打鍵カウント・重複除外・送信 |
-| `win32/tip/tip_text_service.cc` | `OnTestKeyDown` から呼ぶ／`OnMenuSelect` に設定変更 |
+| `win32/tip/tip_text_service.cc` | `OnTestKeyDown` と `OnKeyDown` から呼ぶ／`OnMenuSelect` に設定変更 |
 | `win32/tip/tip_lang_bar.cc` / `tip_lang_bar_menu.cc` / `tip_lang_bar_callback.h` | メニュー項目の追加と特別扱い |
 | `win32/tip/tip_resource.h` / `tip_resource.rc` | メニューの文字列 |
 | `renderer/win32/win32_renderer_client.{h,cc}` | `OnDopagakiEvent` と別枠送信 |
@@ -580,3 +580,10 @@ jobs:
   - 2回目（run 3）は **19.6分**（quick_check 4分、package 15.5分、Qt はキャッシュで省略、ディスクキャッシュ 2599 件ヒット）。インストーラーのバージョンは `3.34.6345.1030` になった。
   - run 3 のインストーラーを `msiexec /i` で起動し、こーたが管理者確認を許可。`mozc_tip64.dll` などが他のアプリで使用中のため、インストールに約5分かかって最後に再起動を求められた（正常。再起動で使用中のファイルが入れ替わる）。再起動後は全ファイル `3.34.6345.1030`、メモ帳で入力・変換できることをこーたが確認。毎回こうなる前提で、こーたには「インストール中はほかのアプリを閉じておくとよい」と伝えてある。
   - 次はフェーズ1。開始前に K1〜K3 を確認する。
+- 2026-10-16：**フェーズ1 実装**（こーたの確認中）。
+  - K1〜K3 はこーた確認済み（案どおり。変換・無変換キーは数える。長押しは試したうえで「数えない」のままでOK）。
+  - 4.1〜4.5 と仮表示（`renderer/win32/dopagaki_debug_window.{h,cc}`：右下に「COMBO 12 / A」、5秒で消える、BREAK は赤）を実装。`dopagaki_state_test`（14ケース）は `quick_check` で合格。
+  - 1回目（run 4、`3.34.6345.1040`）は**まったく数えられなかった**。原因：メモ帳・Brave では `OnTestKeyDown` が呼ばれない（4.2 参照）。`OnKeyDown` でも数えるように直した run 5（`3.34.6345.1050`）で、メモ帳で COMBO 表示・BREAK が動くことをこーたが確認。
+  - 確認用の一時ログ（`OutputDebugStringW`、回数だけで打った内容は出さない）を TIP・送信スレッド・レンダラーに入れてある（`TEMPORARY (phase 1)` の印）。TIP は1打ごとに出すので、**フェーズ2で仮表示と一緒に消すか減らす**こと。
+  - ログの取り方：DebugView の代わりに、`DBWIN_BUFFER` を読む小さな PowerShell スクリプトで記録した（非管理者で可）。TIP（メモ帳・Brave）のログは取れたが、**レンダラーのログは取れなかった**（表示は動いているので届いてはいる。レンダラー側の権限の違いと思われる。必要ならフェーズ2で調べる）。
+  - インストールは毎回「約2〜5分＋最後に再起動」。
