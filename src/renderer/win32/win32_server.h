@@ -34,9 +34,11 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_interface.h"
 #include "renderer/renderer_server.h"
 #include "renderer/win32/window_manager.h"
@@ -72,9 +74,21 @@ class Win32Server : public RendererServer, public RendererInterface {
   int StartMessageLoop() override;
 
  private:
+  // Stores |proto_message| as the next UI command. Called with |mutex_| held.
+  void SetMessageLocked(absl::string_view proto_message);
+  // Dopagaki: keeps the latest event of each session. Called with
+  // |dopagaki_mutex_| held.
+  void AddDopagakiEventLocked(const commands::DopagakiEvent& event);
+  void HandleDopagakiEvents();
+
   std::string message_;
   absl::Mutex mutex_;
   HANDLE event_;
+  // Dopagaki: kept apart from |message_| so that a DopagakiEvent never
+  // overwrites a UI command and vice versa.
+  std::vector<commands::DopagakiEvent> dopagaki_events_;
+  absl::Mutex dopagaki_mutex_;
+  HANDLE dopagaki_event_;
   std::unique_ptr<WindowManager> window_manager_;
 };
 

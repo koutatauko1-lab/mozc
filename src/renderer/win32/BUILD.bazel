@@ -151,6 +151,7 @@ mozc_cc_library(
     visibility = ["//win32/tip:__subpackages__"],
     deps = [
         "//base:system_util",
+        "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_client",
         "@com_google_absl//absl/base:core_headers",
@@ -211,6 +212,7 @@ mozc_cc_library(
     deps = [
         ":window_manager",
         "//base:vlog",
+        "//protocol:config_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_interface",
         "//renderer:renderer_server",
@@ -252,17 +254,63 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":candidate_window",
+        ":dopagaki_debug_window",
+        ":dopagaki_state",
         ":indicator_window",
         ":infolist_window",
         ":win32_dpi_util",
         ":win32_renderer_util",
         "//base:coordinates",
+        "//base/win32:win_util",
         "//client:client_interface",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:window_util",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Dopagaki: combo and rank logic. No Windows API is used.
+mozc_cc_library(
+    name = "dopagaki_state",
+    srcs = ["dopagaki_state.cc"],
+    hdrs = ["dopagaki_state.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//protocol:renderer_cc_proto",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+mozc_cc_test(
+    name = "dopagaki_state_test",
+    srcs = ["dopagaki_state_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY + ["dopagaki"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_state",
+        "//protocol:renderer_cc_proto",
+        "//testing:gunit_main",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Dopagaki: TEMPORARY "COMBO 12 / A" window for phase 1.
+mozc_cc_library(
+    name = "dopagaki_debug_window",
+    srcs = ["dopagaki_debug_window.cc"],
+    hdrs = ["dopagaki_debug_window.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_state",
+        "//bazel/win32:gdi32",
+        "//bazel/win32:shcore",
+        "//bazel/win32:user32",
     ],
 )
 

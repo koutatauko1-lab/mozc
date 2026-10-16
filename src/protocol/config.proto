@@ -375,4 +375,23 @@ message Config {
   reserved "hangul_config";
   reserved 999;
   reserved "chewing_config";
+
+  //////////////////////////////////////////////////////////////
+  //
+  // Dopagaki (fork only, 7000-)
+  //
+  message DopagakiConfig {
+    enum SoundSet {
+      PICO = 0;
+      TYPEWRITER = 1;
+      HIT = 2;
+      TAIKO = 3;
+      SPARKLE = 4;
+      MECHA = 5;
+      MUTE = 6;
+    }
+    optional bool enabled = 1 [default = true];
+    optional SoundSet sound_set = 2 [default = PICO];
+  }
+  optional DopagakiConfig dopagaki_config = 7000;
 }

@@ -55,6 +55,10 @@ class Win32RendererClient {
   // Passes the |command| to the renderer. This function returns
   // asynchronously and only the last call will be used.
   static void OnUpdated(const commands::RendererCommand& command);
+  // Dopagaki: passes |event| to the renderer. It is kept apart from the
+  // command of OnUpdated so that neither overwrites the other. Only the last
+  // event is sent, which is fine because the counters are cumulative.
+  static void OnDopagakiEvent(const commands::DopagakiEvent& event);
 };
 
 }  // namespace win32

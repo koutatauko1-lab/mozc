@@ -37,6 +37,8 @@
 #include "client/client_interface.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
+#include "renderer/win32/dopagaki_debug_window.h"
+#include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
 #include "renderer/win32/win32_renderer_util.h"
@@ -62,8 +64,12 @@ class WindowManager {
   void SetSendCommandInterface(
       client::SendCommandInterface* send_command_interface);
   void PreTranslateMessage(const MSG& message);
+  // Dopagaki: must be called on the UI thread.
+  void OnDopagakiEvent(const commands::DopagakiEvent& event);
 
  private:
+  std::unique_ptr<DopagakiState> dopagaki_state_;
+  std::unique_ptr<DopagakiDebugWindow> dopagaki_debug_window_;
   std::unique_ptr<CandidateWindow> main_window_;
   std::unique_ptr<CandidateWindow> cascading_window_;
   std::unique_ptr<IndicatorWindow> indicator_window_;

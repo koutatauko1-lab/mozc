@@ -204,6 +204,7 @@ mozc_cc_library(
     deps = [
         ":tip_display_attributes",
         ":tip_dll_module",
+        ":tip_dopagaki",
         ":tip_edit_session",
         ":tip_enum_display_attributes",
         ":tip_input_mode_manager",
@@ -233,6 +234,26 @@ mozc_cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
+        "@com_microsoft_wil//:wil",
+    ],
+)
+
+# Dopagaki: counts keystrokes and sends them to the renderer.
+mozc_cc_library(
+    name = "tip_dopagaki",
+    srcs = ["tip_dopagaki.cc"],
+    hdrs = ["tip_dopagaki.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":tip_input_mode_manager",
+        ":tip_status",
+        ":tip_text_service",
+        ":tip_thread_context",
+        "//base/win32:win_util",
+        "//protocol:renderer_cc_proto",
+        "//renderer/win32:win32_renderer_client",
+        "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
     ],
 )

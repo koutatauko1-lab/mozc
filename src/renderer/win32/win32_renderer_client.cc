@@ -40,6 +40,7 @@
 #include "absl/log/log.h"
 #include "absl/synchronization/mutex.h"
 #include "base/system_util.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_client.h"
 
@@ -48,7 +49,9 @@ namespace renderer {
 namespace win32 {
 
 namespace {
+using ::mozc::commands::DopagakiEvent;
 using ::mozc::commands::RendererCommand;
+using DopagakiConfig = ::mozc::config::Config::DopagakiConfig;
 
 class SenderThread;
 SenderThread* g_sender_thread = nullptr;
@@ -85,6 +88,26 @@ class SenderThread {
   void UpdateCommand(const RendererCommand& new_command) {
     absl::MutexLock lock(&mutex_);
     renderer_command_ = new_command;
+    has_renderer_command_ = true;
+    command_event_.SetEvent();
+  }
+
+  void UpdateDopagakiEvent(const DopagakiEvent& new_event) {
+    absl::MutexLock lock(&mutex_);
+    // Settings are not cumulative. Keep unsent settings when a newer event
+    // without settings overwrites the pending one.
+    const bool keep_settings = has_dopagaki_event_ &&
+                               dopagaki_event_.has_settings() &&
+                               !new_event.has_settings();
+    DopagakiConfig settings;
+    if (keep_settings) {
+      settings = dopagaki_event_.settings();
+    }
+    dopagaki_event_ = new_event;
+    if (keep_settings) {
+      *dopagaki_event_.mutable_settings() = settings;
+    }
+    has_dopagaki_event_ = true;
     command_event_.SetEvent();
   }
 
@@ -126,10 +149,28 @@ class SenderThread {
       }
       // handles[1], that is, renderer event is signaled.
       RendererCommand command;
+      bool has_command = false;
       {
         absl::MutexLock lock(&mutex_);
-        command.Swap(&renderer_command_);
+        if (has_renderer_command_) {
+          command.Swap(&renderer_command_);
+          has_renderer_command_ = false;
+          has_command = true;
+        }
+        if (has_dopagaki_event_) {
+          // Attach the event to the UI command, or send it alone with NOOP.
+          if (!has_command) {
+            command.set_type(RendererCommand::NOOP);
+            has_command = true;
+          }
+          command.mutable_dopagaki()->Swap(&dopagaki_event_);
+          dopagaki_event_.Clear();
+          has_dopagaki_event_ = false;
+        }
         command_event_.ResetEvent();
+      }
+      if (!has_command) {
+        continue;
       }
       if (!renderer_client->ExecCommand(command)) {
         DLOG(ERROR) << "RendererClient::ExecCommand failed.";
@@ -141,6 +182,9 @@ class SenderThread {
   wil::unique_event_nothrow command_event_;
   wil::unique_event_nothrow quit_event_;
   RendererCommand renderer_command_;
+  bool has_renderer_command_ = false;
+  DopagakiEvent dopagaki_event_;
+  bool has_dopagaki_event_ = false;
   absl::Mutex mutex_;
 };
 
@@ -302,6 +346,23 @@ void Win32RendererClient::OnUpdated(const RendererCommand& command) {
   }
   if (thread != nullptr) {
     thread->UpdateCommand(command);
+  }
+}
+
+void Win32RendererClient::OnDopagakiEvent(
+    const commands::DopagakiEvent& event) {
+  // Unlike OnUpdated, CanIgnoreRequest is not used here because it may drop
+  // commands whose |visible| is false.
+  if (!EnsureUIThreadInitialized()) {
+    return;
+  }
+  SenderThread* thread = nullptr;
+  {
+    absl::MutexLock lock(&g_mutex);
+    thread = g_sender_thread;
+  }
+  if (thread != nullptr) {
+    thread->UpdateDopagakiEvent(event);
   }
 }
 

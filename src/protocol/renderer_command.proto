@@ -38,6 +38,25 @@ syntax = "proto2";
 package mozc.commands;
 
 import "protocol/commands.proto";
+import "protocol/config.proto";
+
+// --- Dopagaki (fork only) ---
+// Keystroke counters sent from the TIP to the renderer. They are cumulative so
+// that nothing is lost even when a newer command overwrites an older one.
+message DopagakiEvent {
+  // A random number created when the TIP DLL is loaded. Identifies a process.
+  optional fixed64 session_id = 1;
+  // Number of counted keystrokes in this session (BackSpace is not included).
+  optional uint64 key_count = 2;
+  // Number of BackSpace presses in this session.
+  optional uint64 break_count = 3;
+  // Number of counted keystrokes since the last BackSpace.
+  optional uint64 keys_since_break = 4;
+  // HWND of the window being typed in (WinUtil::EncodeWindowHandle).
+  optional uint32 target_window_handle = 5;
+  // Set only when the settings are changed from the menu.
+  optional mozc.config.Config.DopagakiConfig settings = 6;
+}
 
 message RendererCommand {
   message Rectangle {
@@ -157,4 +176,7 @@ message RendererCommand {
   }
 
   optional ApplicationInfo application_info = 5;
+
+  // Dopagaki (fork only). Uses a large number to avoid conflicts with upstream.
+  optional DopagakiEvent dopagaki = 1000;
 }

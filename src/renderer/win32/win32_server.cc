@@ -31,13 +31,17 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "base/vlog.h"
+#include "protocol/config.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/window_manager.h"
 
@@ -61,16 +65,26 @@ bool IsTSFMessage(const commands::RendererCommand& command) {
 namespace win32 {
 
 Win32Server::Win32Server()
-    : event_(nullptr), window_manager_(new WindowManager) {
+    : event_(nullptr),
+      dopagaki_event_(nullptr),
+      window_manager_(new WindowManager) {
   // Manual reset event to notify we have a renderer command
   // to be handled in the UI thread.
   // The renderer command is serialized into "message_".
   event_ = ::CreateEvent(nullptr, FALSE, FALSE, nullptr);
   DCHECK_NE(nullptr, event_)
       << "CreateEvent failed, Error = " << ::GetLastError();
+  // Dopagaki: notifies the UI thread of new DopagakiEvents. If this fails,
+  // only the Dopagaki features stop working.
+  dopagaki_event_ = ::CreateEvent(nullptr, FALSE, FALSE, nullptr);
 }
 
-Win32Server::~Win32Server() { ::CloseHandle(event_); }
+Win32Server::~Win32Server() {
+  ::CloseHandle(event_);
+  if (dopagaki_event_ != nullptr) {
+    ::CloseHandle(dopagaki_event_);
+  }
+}
 
 void Win32Server::AsyncHide() {
   {
@@ -132,19 +146,81 @@ void Win32Server::SetSendCommandInterface(
 }
 
 bool Win32Server::AsyncExecCommand(absl::string_view proto_message) {
+  // Dopagaki: take DopagakiEvent out of the command first so that it never
+  // overwrites a UI command (and vice versa).
+  commands::RendererCommand command;
+  if (dopagaki_event_ != nullptr &&
+      command.ParseFromArray(proto_message.data(),
+                             static_cast<int>(proto_message.size())) &&
+      command.has_dopagaki()) {
+    {
+      absl::MutexLock l(&dopagaki_mutex_);
+      AddDopagakiEventLocked(command.dopagaki());
+      ::SetEvent(dopagaki_event_);
+    }
+    if (command.type() == commands::RendererCommand::NOOP) {
+      // A command only for Dopagaki. Do not touch |message_|.
+      return true;
+    }
+    command.clear_dopagaki();
+    const std::string ui_message = command.SerializeAsString();
+    absl::MutexLock l(&mutex_);
+    SetMessageLocked(ui_message);
+    return true;
+  }
+
   // Take the ownership of |proto_message|.
   absl::MutexLock l(&mutex_);
+  SetMessageLocked(proto_message);
+  return true;
+}
+
+void Win32Server::SetMessageLocked(absl::string_view proto_message) {
   if (message_ == proto_message) {
     // This is exactly the same to the previous message. Theoretically it is
     // safe to do nothing here.
-    return true;
+    return;
   }
   // Since mozc rendering protocol is state-less, we can always ignore the
   // previous content of |message_|.
   message_.assign(proto_message.data(), proto_message.size());
   // Set the event signaled to mark we have a message to render.
   ::SetEvent(event_);
-  return true;
+}
+
+void Win32Server::AddDopagakiEventLocked(const commands::DopagakiEvent& event) {
+  // Counters are cumulative, so only the latest event of each session is
+  // needed. Settings are not cumulative, so unsent settings are kept.
+  for (commands::DopagakiEvent& pending : dopagaki_events_) {
+    if (pending.session_id() != event.session_id()) {
+      continue;
+    }
+    if (pending.has_settings() && !event.has_settings()) {
+      const config::Config::DopagakiConfig settings = pending.settings();
+      pending = event;
+      *pending.mutable_settings() = settings;
+    } else {
+      pending = event;
+    }
+    return;
+  }
+  constexpr size_t kMaxPendingSessions = 64;
+  if (dopagaki_events_.size() >= kMaxPendingSessions) {
+    dopagaki_events_.erase(dopagaki_events_.begin());
+  }
+  dopagaki_events_.push_back(event);
+}
+
+void Win32Server::HandleDopagakiEvents() {
+  std::vector<commands::DopagakiEvent> events;
+  {
+    absl::MutexLock l(&dopagaki_mutex_);
+    events.swap(dopagaki_events_);
+    ::ResetEvent(dopagaki_event_);
+  }
+  for (const commands::DopagakiEvent& event : events) {
+    window_manager_->OnDopagakiEvent(event);
+  }
 }
 
 int Win32Server::StartMessageLoop() {
@@ -166,8 +242,11 @@ int Win32Server::StartMessageLoop() {
     }
 
     // Wait for the next window message or next rendering message.
-    const DWORD wait_result =
-        ::MsgWaitForMultipleObjects(1, &event_, FALSE, INFINITE, QS_ALLINPUT);
+    // Dopagaki: also wait for |dopagaki_event_| if it is available.
+    const HANDLE handles[] = {event_, dopagaki_event_};
+    const DWORD handle_count = (dopagaki_event_ != nullptr) ? 2 : 1;
+    const DWORD wait_result = ::MsgWaitForMultipleObjects(
+        handle_count, handles, FALSE, INFINITE, QS_ALLINPUT);
     if (wait_result == WAIT_OBJECT_0) {
       // "event_" is signaled so that we have to handle the renderer command
       // stored in "message_"
@@ -186,7 +265,9 @@ int Win32Server::StartMessageLoop() {
       } else {
         LOG(ERROR) << "ParseFromString failed";
       }
-    } else if (wait_result == WAIT_OBJECT_0 + 1) {
+    } else if (handle_count == 2 && wait_result == WAIT_OBJECT_0 + 1) {
+      HandleDopagakiEvents();
+    } else if (wait_result == WAIT_OBJECT_0 + handle_count) {
       // We have at least one window message. Let's handle them.
       while (true) {
         MSG msg = {};

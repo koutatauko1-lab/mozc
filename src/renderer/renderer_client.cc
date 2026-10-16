@@ -438,7 +438,12 @@ bool RendererClient::ExecCommand(const commands::RendererCommand& command) {
     return false;
   }
 
-  is_window_visible_ = command.visible();
+  // Dopagaki: a NOOP command that only carries DopagakiEvent says nothing
+  // about the visibility of the windows.
+  if (command.type() != commands::RendererCommand::NOOP ||
+      !command.has_dopagaki()) {
+    is_window_visible_ = command.visible();
+  }
 
   if (!client->Connected()) {
     // We don't need to send HIDE if the renderer is not running

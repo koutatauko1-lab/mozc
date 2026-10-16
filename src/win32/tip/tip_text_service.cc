@@ -61,6 +61,7 @@
 #include "win32/base/win32_window_util.h"
 #include "win32/tip/tip_display_attributes.h"
 #include "win32/tip/tip_dll_module.h"
+#include "win32/tip/tip_dopagaki.h"
 #include "win32/tip/tip_edit_session.h"
 #include "win32/tip/tip_edit_session_impl.h"
 #include "win32/tip/tip_enum_display_attributes.h"
@@ -782,6 +783,8 @@ class TipTextServiceImpl
       eaten = &dummy_eaten;
     }
     *eaten = FALSE;
+    // Dopagaki: count the keystroke. This never affects |eaten|.
+    TipDopagaki::OnTestKeyDown(this, context, wparam, lparam);
     return TipKeyeventHandler::OnTestKeyDown(this, context, wparam, lparam,
                                              eaten);
   }

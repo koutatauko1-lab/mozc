@@ -121,6 +121,8 @@ class TipInputModeManager : public TipInputModeManagerImpl {
   commands::CompositionMode GetEffectiveConversionMode() const;
   // Returns IME conversion mode that is visible from TSF.
   commands::CompositionMode GetTsfConversionMode() const;
+  // Returns the InputScope list of the focused context. (Dopagaki)
+  absl::Span<const InputScope> input_scope() const { return input_scope_; }
 
  private:
   bool use_global_mode_ = false;

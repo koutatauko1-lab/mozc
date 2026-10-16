@@ -102,7 +102,10 @@ proto_library(
         "renderer_command.proto",
         "renderer_style.proto",
     ],
-    deps = [":commands_proto"],
+    deps = [
+        ":commands_proto",
+        ":config_proto",
+    ],
 )
 
 cc_proto_library(

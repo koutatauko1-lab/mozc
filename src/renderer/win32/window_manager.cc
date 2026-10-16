@@ -33,15 +33,22 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <iterator>
 #include <memory>
+#include <vector>
 
 #include "absl/log/check.h"
+#include "absl/time/clock.h"
 #include "base/coordinates.h"
+#include "base/win32/win_util.h"
 #include "client/client_interface.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
+#include "renderer/win32/dopagaki_debug_window.h"
+#include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
 #include "renderer/win32/win32_dpi_util.h"
@@ -60,7 +67,9 @@ const POINT kInvalidMousePosition = {-65535, -65535};
 }  // namespace
 
 WindowManager::WindowManager()
-    : main_window_(std::make_unique<CandidateWindow>()),
+    : dopagaki_state_(std::make_unique<DopagakiState>()),
+      dopagaki_debug_window_(std::make_unique<DopagakiDebugWindow>()),
+      main_window_(std::make_unique<CandidateWindow>()),
       cascading_window_(std::make_unique<CandidateWindow>()),
       indicator_window_(std::make_unique<IndicatorWindow>()),
       infolist_window_(std::make_unique<InfolistWindow>()),
@@ -109,6 +118,7 @@ void WindowManager::DestroyAllWindows() {
   if (infolist_window_->IsWindow()) {
     infolist_window_->DestroyWindow();
   }
+  dopagaki_debug_window_->Destroy();
 }
 
 void WindowManager::HideAllWindows() {
@@ -442,6 +452,30 @@ void WindowManager::PreTranslateMessage(const MSG& message) {
   // filter unnecessary WM_MOUSEMOVE events.
   main_window_->set_mouse_moving(is_moving);
   cascading_window_->set_mouse_moving(is_moving);
+}
+
+void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
+  const std::vector<DopagakiAction> actions =
+      dopagaki_state_->OnEvent(event, absl::Now());
+  if (actions.empty()) {
+    return;
+  }
+  bool broke = false;
+  for (const DopagakiAction& action : actions) {
+    if (action.type == DopagakiAction::Type::kBreak) {
+      broke = true;
+    }
+  }
+  wchar_t log[128] = {};
+  ::swprintf_s(log, std::size(log),
+               L"[dopagaki] renderer combo=%llu rank=%hs actions=%zu%ls\n",
+               static_cast<unsigned long long>(dopagaki_state_->combo()),
+               GetDopagakiRankName(dopagaki_state_->rank()), actions.size(),
+               broke ? L" BREAK" : L"");
+  ::OutputDebugStringW(log);
+  dopagaki_debug_window_->Show(
+      dopagaki_state_->combo(), dopagaki_state_->rank(), broke,
+      WinUtil::DecodeWindowHandle(event.target_window_handle()));
 }
 
 }  // namespace win32
