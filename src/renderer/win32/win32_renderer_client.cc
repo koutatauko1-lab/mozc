@@ -176,12 +176,8 @@ class SenderThread {
       if (!renderer_client->ExecCommand(command)) {
         DLOG(ERROR) << "RendererClient::ExecCommand failed.";
         if (has_dopagaki) {
-          // TEMPORARY (phase 1)
           ::OutputDebugStringW(L"[dopagaki] sender ExecCommand failed\n");
         }
-      } else if (has_dopagaki) {
-        // TEMPORARY (phase 1)
-        ::OutputDebugStringW(L"[dopagaki] sender sent\n");
       }
     }
   }
@@ -362,7 +358,6 @@ void Win32RendererClient::OnDopagakiEvent(
   // Unlike OnUpdated, CanIgnoreRequest is not used here because it may drop
   // commands whose |visible| is false.
   if (!EnsureUIThreadInitialized()) {
-    // TEMPORARY (phase 1)
     ::OutputDebugStringW(L"[dopagaki] sender not initialized\n");
     return;
   }
@@ -374,7 +369,6 @@ void Win32RendererClient::OnDopagakiEvent(
   if (thread != nullptr) {
     thread->UpdateDopagakiEvent(event);
   } else {
-    // TEMPORARY (phase 1)
     ::OutputDebugStringW(L"[dopagaki] sender thread is missing\n");
   }
 }

@@ -77,8 +77,28 @@ mozc_win32_lib(
     name = "d2d1",
 )
 
+# Dopagaki: the overlay.
+mozc_win32_lib(
+    name = "d3d11",
+)
+
+# Dopagaki: the overlay.
+mozc_win32_lib(
+    name = "dcomp",
+)
+
 mozc_win32_lib(
     name = "dwrite",
+)
+
+# Dopagaki: the overlay.
+mozc_win32_lib(
+    name = "dxgi",
+)
+
+# Dopagaki: GUIDs of Direct2D effects.
+mozc_win32_lib(
+    name = "dxguid",
 )
 
 mozc_win32_lib(

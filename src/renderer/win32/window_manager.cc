@@ -31,11 +31,12 @@
 
 #include <windows.h>
 
+#include <d2d1.h>
+
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
-#include <iterator>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "absl/log/check.h"
@@ -47,7 +48,8 @@
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
-#include "renderer/win32/dopagaki_debug_window.h"
+#include "renderer/win32/dopagaki_effects.h"
+#include "renderer/win32/dopagaki_overlay.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
@@ -68,7 +70,7 @@ const POINT kInvalidMousePosition = {-65535, -65535};
 
 WindowManager::WindowManager()
     : dopagaki_state_(std::make_unique<DopagakiState>()),
-      dopagaki_debug_window_(std::make_unique<DopagakiDebugWindow>()),
+      dopagaki_overlay_(std::make_unique<DopagakiOverlay>()),
       main_window_(std::make_unique<CandidateWindow>()),
       cascading_window_(std::make_unique<CandidateWindow>()),
       indicator_window_(std::make_unique<IndicatorWindow>()),
@@ -118,7 +120,7 @@ void WindowManager::DestroyAllWindows() {
   if (infolist_window_->IsWindow()) {
     infolist_window_->DestroyWindow();
   }
-  dopagaki_debug_window_->Destroy();
+  dopagaki_overlay_->Destroy();
 }
 
 void WindowManager::HideAllWindows() {
@@ -405,6 +407,8 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     }
     cascading_window_->ShowWindow(SW_HIDE);
   }
+  // Dopagaki: keep the effects above the candidate windows.
+  dopagaki_overlay_->BringToTop();
 }
 
 bool WindowManager::IsAvailable() const {
@@ -458,26 +462,90 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
   const std::vector<DopagakiAction> actions =
       dopagaki_state_->OnEvent(event, absl::Now());
   if (actions.empty()) {
-    // TEMPORARY (phase 1)
-    ::OutputDebugStringW(L"[dopagaki] renderer event without actions\n");
     return;
   }
-  bool broke = false;
+  const HWND target_window =
+      WinUtil::DecodeWindowHandle(event.target_window_handle());
+  if (!dopagaki_overlay_->Prepare(target_window)) {
+    // The overlay is not available. Only the combo is counted.
+    return;
+  }
+  DopagakiEffects& effects = dopagaki_overlay_->effects();
+
+  // Particles come from the top-right corner of the candidate window, or from
+  // the combo label near the caret (K5) when there is no candidate window.
+  D2D1_POINT_2F origin = {};
+  std::optional<D2D1_POINT_2F> label_position;
+  if (main_window_->IsWindowVisible()) {
+    RECT rect = {};
+    main_window_->GetWindowRect(&rect);
+    const D2D1_POINT_2F corner =
+        dopagaki_overlay_->ScreenToOverlay({rect.right, rect.top});
+    origin = D2D1::Point2F(corner.x - 10, corner.y + 4);
+  } else {
+    label_position = GetDopagakiComboLabelPosition(target_window);
+    origin = D2D1::Point2F(label_position->x + 40, label_position->y + 12);
+  }
+
   for (const DopagakiAction& action : actions) {
-    if (action.type == DopagakiAction::Type::kBreak) {
-      broke = true;
+    switch (action.type) {
+      case DopagakiAction::Type::kKeys:
+        // Keystrokes merged into one event get up to 3 bursts.
+        for (uint64_t i = 0; i < std::min<uint64_t>(action.count, 3); ++i) {
+          effects.OnKey(action.rank, origin.x, origin.y);
+        }
+        break;
+      case DopagakiAction::Type::kRankUp:
+        effects.OnRankUp(action.rank);
+        break;
+      case DopagakiAction::Type::kBreak:
+        // With combo 0, only the sound is played (phase 5).
+        if (action.count > 0) {
+          effects.OnBreak(origin.x, origin.y);
+        }
+        break;
     }
   }
-  wchar_t log[128] = {};
-  ::swprintf_s(log, std::size(log),
-               L"[dopagaki] renderer combo=%llu rank=%hs actions=%zu%ls\n",
-               static_cast<unsigned long long>(dopagaki_state_->combo()),
-               GetDopagakiRankName(dopagaki_state_->rank()), actions.size(),
-               broke ? L" BREAK" : L"");
-  ::OutputDebugStringW(log);
-  dopagaki_debug_window_->Show(
-      dopagaki_state_->combo(), dopagaki_state_->rank(), broke,
-      WinUtil::DecodeWindowHandle(event.target_window_handle()));
+  if (label_position.has_value() && dopagaki_state_->combo() > 0) {
+    effects.ShowComboLabel(dopagaki_state_->combo(), dopagaki_state_->rank(),
+                           label_position->x, label_position->y);
+  } else {
+    // The combo on the candidate window ("x42") comes in phase 4.
+    effects.HideComboLabel();
+  }
+  dopagaki_overlay_->StartAnimation();
+}
+
+D2D1_POINT_2F WindowManager::GetDopagakiComboLabelPosition(
+    HWND target_window) const {
+  const DopagakiEffects& effects = dopagaki_overlay_->effects();
+  D2D1_POINT_2F position = {};
+  RECT caret = {};
+  if (GetDopagakiCaretRect(target_window, &caret)) {
+    // A little above and to the right of the caret.
+    const D2D1_POINT_2F point =
+        dopagaki_overlay_->ScreenToOverlay({caret.right, caret.top});
+    position = D2D1::Point2F(point.x + 12, point.y - 34);
+  } else {
+    // The application does not tell the caret position. Use the bottom-right
+    // area of the window being typed in.
+    HWND root = target_window != nullptr
+                    ? ::GetAncestor(target_window, GA_ROOT)
+                    : ::GetForegroundWindow();
+    RECT rect = {};
+    if (root != nullptr && ::GetWindowRect(root, &rect)) {
+      const D2D1_POINT_2F point =
+          dopagaki_overlay_->ScreenToOverlay({rect.right, rect.bottom});
+      position = D2D1::Point2F(point.x - 240, point.y - 80);
+    } else {
+      position =
+          D2D1::Point2F(effects.width() - 260, effects.height() - 100);
+    }
+  }
+  position.x = std::clamp(position.x, 8.0f, std::max(8.0f, effects.width() - 200));
+  position.y =
+      std::clamp(position.y, 8.0f, std::max(8.0f, effects.height() - 50));
+  return position;
 }
 
 }  // namespace win32

@@ -9,10 +9,8 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <iterator>
 
 #include "absl/types/span.h"
@@ -64,10 +62,6 @@ uint64_t g_break_count = 0;
 uint64_t g_keys_since_break = 0;
 RecentKey g_recent_keys[8];
 size_t g_recent_key_index = 0;
-
-// TEMPORARY (phase 1): whether each route has been called at least once.
-std::atomic<bool> g_test_key_down_reached = false;
-std::atomic<bool> g_key_down_reached = false;
 
 // SplitMix64. Used only to mix bits.
 uint64_t Mix(uint64_t x) {
@@ -191,44 +185,13 @@ HWND GetTargetWindow(ITfContext* context) {
   return ::GetForegroundWindow();
 }
 
-const wchar_t* GetRouteName(KeyRoute route) {
-  return route == KeyRoute::kTestKeyDown ? L"test" : L"key";
-}
-
-// Writes a log for DebugView. Never write what was typed here.
-void DebugLog(const DopagakiEvent& event, KeyRoute route, bool is_break) {
-  wchar_t buffer[160] = {};
-  ::swprintf_s(buffer, std::size(buffer),
-               L"[dopagaki] tip %ls via=%ls keys=%llu breaks=%llu since=%llu\n",
-               is_break ? L"break" : L"key", GetRouteName(route),
-               static_cast<unsigned long long>(event.key_count()),
-               static_cast<unsigned long long>(event.break_count()),
-               static_cast<unsigned long long>(event.keys_since_break()));
-  ::OutputDebugStringW(buffer);
-}
-
-// TEMPORARY (phase 1): logs once per process that |route| is used.
-void LogFirstCall(KeyRoute route) {
-  std::atomic<bool>& reached = route == KeyRoute::kTestKeyDown
-                                   ? g_test_key_down_reached
-                                   : g_key_down_reached;
-  if (reached.exchange(true)) {
-    return;
-  }
-  wchar_t buffer[96] = {};
-  ::swprintf_s(buffer, std::size(buffer),
-               L"[dopagaki] tip first call via=%ls pid=%lu\n",
-               GetRouteName(route),
-               static_cast<unsigned long>(::GetCurrentProcessId()));
-  ::OutputDebugStringW(buffer);
-}
-
+// |route| is not used for counting, but kept to tell where a keystroke came
+// from when debugging.
 void CountKeyDown(TipTextService* text_service, ITfContext* context,
-                  WPARAM wparam, LPARAM lparam, KeyRoute route) {
+                  WPARAM wparam, LPARAM lparam, KeyRoute /*route*/) {
   if (text_service == nullptr) {
     return;
   }
-  LogFirstCall(route);
   // K1: bit 30 is set when the key was already down (auto-repeat).
   if ((static_cast<uint32_t>(lparam) & (1u << 30)) != 0) {
     return;
@@ -238,7 +201,6 @@ void CountKeyDown(TipTextService* text_service, ITfContext* context,
     return;
   }
   if (IsPrivateContext(text_service, context)) {
-    ::OutputDebugStringW(L"[dopagaki] tip skipped: private context\n");
     return;
   }
 
@@ -271,7 +233,6 @@ void CountKeyDown(TipTextService* text_service, ITfContext* context,
   event.set_session_id(GetSessionId());
   event.set_target_window_handle(
       WinUtil::EncodeWindowHandle(GetTargetWindow(context)));
-  DebugLog(event, route, is_break);
   Win32RendererClient::OnDopagakiEvent(event);
 }
 

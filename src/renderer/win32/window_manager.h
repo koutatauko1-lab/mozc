@@ -37,7 +37,7 @@
 #include "client/client_interface.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
-#include "renderer/win32/dopagaki_debug_window.h"
+#include "renderer/win32/dopagaki_overlay.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
@@ -68,8 +68,11 @@ class WindowManager {
   void OnDopagakiEvent(const commands::DopagakiEvent& event);
 
  private:
+  // Dopagaki: where "29 COMBO A" is shown, in DIPs on the overlay.
+  D2D1_POINT_2F GetDopagakiComboLabelPosition(HWND target_window) const;
+
   std::unique_ptr<DopagakiState> dopagaki_state_;
-  std::unique_ptr<DopagakiDebugWindow> dopagaki_debug_window_;
+  std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;
   std::unique_ptr<CandidateWindow> main_window_;
   std::unique_ptr<CandidateWindow> cascading_window_;
   std::unique_ptr<IndicatorWindow> indicator_window_;

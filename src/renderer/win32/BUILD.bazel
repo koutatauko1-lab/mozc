@@ -254,7 +254,8 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":candidate_window",
-        ":dopagaki_debug_window",
+        ":dopagaki_effects",
+        ":dopagaki_overlay",
         ":dopagaki_state",
         ":indicator_window",
         ":infolist_window",
@@ -299,18 +300,46 @@ mozc_cc_test(
     ],
 )
 
-# Dopagaki: TEMPORARY "COMBO 12 / A" window for phase 1.
+# Dopagaki: particles, banners, flash and shake. No Windows API is used.
 mozc_cc_library(
-    name = "dopagaki_debug_window",
-    srcs = ["dopagaki_debug_window.cc"],
-    hdrs = ["dopagaki_debug_window.h"],
+    name = "dopagaki_effects",
+    srcs = ["dopagaki_effects.cc"],
+    hdrs = ["dopagaki_effects.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [":dopagaki_state"],
+)
+
+mozc_cc_test(
+    name = "dopagaki_effects_test",
+    srcs = ["dopagaki_effects_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY + ["dopagaki"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_effects",
+        ":dopagaki_state",
+        "//testing:gunit_main",
+    ],
+)
+
+# Dopagaki: the transparent window that draws the effects.
+mozc_cc_library(
+    name = "dopagaki_overlay",
+    srcs = ["dopagaki_overlay.cc"],
+    hdrs = ["dopagaki_overlay.h"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
-        ":dopagaki_state",
-        "//bazel/win32:gdi32",
+        ":dopagaki_effects",
+        "//bazel/win32:d2d1",
+        "//bazel/win32:d3d11",
+        "//bazel/win32:dcomp",
+        "//bazel/win32:dwrite",
+        "//bazel/win32:dxgi",
+        "//bazel/win32:dxguid",
         "//bazel/win32:shcore",
         "//bazel/win32:user32",
+        "@com_microsoft_wil//:wil",
     ],
 )
 
