@@ -4,6 +4,7 @@
 #ifndef MOZC_RENDERER_WIN32_DOPAGAKI_SOUND_SYNTH_H_
 #define MOZC_RENDERER_WIN32_DOPAGAKI_SOUND_SYNTH_H_
 
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -41,6 +42,18 @@ void AddDopagakiNoise(double duration, double volume, double highpass,
 std::vector<float> SynthesizeDopagakiSound(
     DopagakiSoundSet sound_set, DopagakiSoundKind kind, int rank_index,
     const std::function<double()>& random);
+
+// The renderer runs in a sandbox that cannot play sounds. It asks the TIP of
+// the application being typed in to play them, by posting the message of
+// kMessageReceiverMessageName (used for the renderer callback) to the
+// renderer callback window with WPARAM = kDopagakiSoundRequest and LPARAM =
+// EncodeDopagakiSoundRequest(...).
+inline constexpr uint32_t kDopagakiSoundRequest = 0x44504741;  // "DPGA"
+uint32_t EncodeDopagakiSoundRequest(DopagakiSoundSet sound_set,
+                                    DopagakiSoundKind kind, int rank_index);
+// Returns false if |value| is not a valid request.
+bool DecodeDopagakiSoundRequest(uint32_t value, DopagakiSoundSet* sound_set,
+                                DopagakiSoundKind* kind, int* rank_index);
 
 }  // namespace win32
 }  // namespace renderer

@@ -102,6 +102,30 @@ TEST(DopagakiSoundSynthTest, MuteIsSilent) {
   }
 }
 
+TEST(DopagakiSoundSynthTest, SoundRequestRoundTrip) {
+  const uint32_t value = EncodeDopagakiSoundRequest(
+      DopagakiConfig::TAIKO, DopagakiSoundKind::kBreak, 3);
+  DopagakiConfig::SoundSet sound_set = DopagakiConfig::PICO;
+  DopagakiSoundKind kind = DopagakiSoundKind::kKey;
+  int rank = 0;
+  ASSERT_TRUE(DecodeDopagakiSoundRequest(value, &sound_set, &kind, &rank));
+  EXPECT_EQ(sound_set, DopagakiConfig::TAIKO);
+  EXPECT_EQ(kind, DopagakiSoundKind::kBreak);
+  EXPECT_EQ(rank, 3);
+}
+
+TEST(DopagakiSoundSynthTest, InvalidSoundRequests) {
+  DopagakiConfig::SoundSet sound_set = DopagakiConfig::PICO;
+  DopagakiSoundKind kind = DopagakiSoundKind::kKey;
+  int rank = 0;
+  // Unknown sound set, kind and rank.
+  EXPECT_FALSE(DecodeDopagakiSoundRequest(99 << 16, &sound_set, &kind, &rank));
+  EXPECT_FALSE(DecodeDopagakiSoundRequest(7 << 8, &sound_set, &kind, &rank));
+  EXPECT_FALSE(DecodeDopagakiSoundRequest(5, &sound_set, &kind, &rank));
+  EXPECT_FALSE(
+      DecodeDopagakiSoundRequest(1u << 24, &sound_set, &kind, &rank));
+}
+
 TEST(DopagakiSoundSynthTest, AllSoundsAreAudibleAndSane) {
   for (const DopagakiConfig::SoundSet sound_set :
        {DopagakiConfig::PICO, DopagakiConfig::TYPEWRITER, DopagakiConfig::HIT,

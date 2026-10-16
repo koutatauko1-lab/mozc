@@ -32,6 +32,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 
@@ -40,7 +41,6 @@
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/dopagaki_overlay.h"
-#include "renderer/win32/dopagaki_sound.h"
 #include "renderer/win32/dopagaki_sound_synth.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
@@ -79,10 +79,12 @@ class WindowManager {
   std::optional<DopagakiRect> GetDopagakiCandidateWindowRect() const;
   // Dopagaki: called before each frame of the overlay.
   void OnDopagakiFrame();
+  // Dopagaki: asks the TIP to play a sound (the renderer's sandbox cannot).
+  void RequestDopagakiSound(uint32_t receiver_window_handle,
+                            DopagakiSoundKind kind);
 
   std::unique_ptr<DopagakiState> dopagaki_state_;
   std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;
-  std::unique_ptr<DopagakiSound> dopagaki_sound_;
   // Chosen from the menu in phase 6. PICO by default.
   DopagakiSoundSet dopagaki_sound_set_ =
       config::Config::DopagakiConfig::PICO;

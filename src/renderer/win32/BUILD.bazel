@@ -289,9 +289,9 @@ mozc_cc_library(
         ":candidate_window",
         ":dopagaki_effects",
         ":dopagaki_overlay",
-        ":dopagaki_sound",
         ":dopagaki_sound_synth",
         ":dopagaki_state",
+        "//base:const",
         ":indicator_window",
         ":infolist_window",
         ":win32_dpi_util",
@@ -364,6 +364,8 @@ mozc_cc_library(
     hdrs = ["dopagaki_sound_synth.h"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
+    # The TIP plays the sounds (the renderer's sandbox cannot).
+    visibility = ["//win32/tip:__subpackages__"],
     deps = ["//protocol:config_cc_proto"],
 )
 
@@ -376,22 +378,6 @@ mozc_cc_test(
         ":dopagaki_sound_synth",
         "//protocol:config_cc_proto",
         "//testing:gunit_main",
-    ],
-)
-
-# Dopagaki: plays the sound effects with XAudio2.
-mozc_cc_library(
-    name = "dopagaki_sound",
-    srcs = ["dopagaki_sound.cc"],
-    hdrs = ["dopagaki_sound.h"],
-    tags = MOZC_TAGS.WIN_ONLY,
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        ":dopagaki_sound_synth",
-        ":dopagaki_state",
-        "//bazel/win32:xaudio2",
-        "//protocol:config_cc_proto",
-        "@com_microsoft_wil//:wil",
     ],
 )
 

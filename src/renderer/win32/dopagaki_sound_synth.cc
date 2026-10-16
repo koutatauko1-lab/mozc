@@ -126,6 +126,29 @@ void AddDopagakiNoise(double duration, double volume, double highpass,
   }
 }
 
+uint32_t EncodeDopagakiSoundRequest(DopagakiSoundSet sound_set,
+                                    DopagakiSoundKind kind, int rank_index) {
+  return (static_cast<uint32_t>(sound_set) & 0xFF) << 16 |
+         (static_cast<uint32_t>(kind) & 0xFF) << 8 |
+         (static_cast<uint32_t>(rank_index) & 0xFF);
+}
+
+bool DecodeDopagakiSoundRequest(uint32_t value, DopagakiSoundSet* sound_set,
+                                DopagakiSoundKind* kind, int* rank_index) {
+  const int set_value = static_cast<int>((value >> 16) & 0xFF);
+  const int kind_value = static_cast<int>((value >> 8) & 0xFF);
+  const int rank_value = static_cast<int>(value & 0xFF);
+  if ((value >> 24) != 0 || !DopagakiConfig::SoundSet_IsValid(set_value) ||
+      kind_value > static_cast<int>(DopagakiSoundKind::kBreak) ||
+      rank_value > 4) {
+    return false;
+  }
+  *sound_set = static_cast<DopagakiSoundSet>(set_value);
+  *kind = static_cast<DopagakiSoundKind>(kind_value);
+  *rank_index = rank_value;
+  return true;
+}
+
 // SOUNDS in the preview. |r| is the rank index.
 std::vector<float> SynthesizeDopagakiSound(
     DopagakiSoundSet sound_set, DopagakiSoundKind kind, int rank_index,

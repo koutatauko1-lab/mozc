@@ -16,7 +16,9 @@
 #include "absl/types/span.h"
 #include "base/win32/win_util.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/win32/dopagaki_sound_synth.h"
 #include "renderer/win32/win32_renderer_client.h"
+#include "win32/tip/tip_dopagaki_sound.h"
 #include "win32/tip/tip_input_mode_manager.h"
 #include "win32/tip/tip_status.h"
 #include "win32/tip/tip_text_service.h"
@@ -233,6 +235,9 @@ void CountKeyDown(TipTextService* text_service, ITfContext* context,
   event.set_session_id(GetSessionId());
   event.set_target_window_handle(
       WinUtil::EncodeWindowHandle(GetTargetWindow(context)));
+  // The renderer asks this window to play sounds.
+  event.set_receiver_window_handle(
+      WinUtil::EncodeWindowHandle(text_service->renderer_callback_window_handle()));
   Win32RendererClient::OnDopagakiEvent(event);
 }
 
@@ -247,6 +252,20 @@ void TipDopagaki::OnTestKeyDown(TipTextService* text_service,
 void TipDopagaki::OnKeyDown(TipTextService* text_service, ITfContext* context,
                             WPARAM wparam, LPARAM lparam) {
   CountKeyDown(text_service, context, wparam, lparam, KeyRoute::kKeyDown);
+}
+
+bool TipDopagaki::OnRendererCallback(WPARAM wparam, LPARAM lparam) {
+  if (wparam != renderer::win32::kDopagakiSoundRequest) {
+    return false;
+  }
+  renderer::win32::DopagakiSoundSet sound_set;
+  renderer::win32::DopagakiSoundKind kind;
+  int rank_index = 0;
+  if (renderer::win32::DecodeDopagakiSoundRequest(
+          static_cast<uint32_t>(lparam), &sound_set, &kind, &rank_index)) {
+    TipDopagakiSound::Play(sound_set, kind, rank_index);
+  }
+  return true;
 }
 
 }  // namespace tsf

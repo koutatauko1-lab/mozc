@@ -34,6 +34,11 @@ class TipDopagaki {
   // |context| may be nullptr.
   static void OnKeyDown(TipTextService* text_service, ITfContext* context,
                         WPARAM wparam, LPARAM lparam);
+
+  // Must be called when the renderer callback window receives the renderer
+  // callback message. Returns true if it was a Dopagaki request (a sound),
+  // which must not be passed to the existing handler.
+  static bool OnRendererCallback(WPARAM wparam, LPARAM lparam);
 };
 
 }  // namespace tsf

@@ -42,6 +42,7 @@
 
 #include "absl/log/check.h"
 #include "absl/time/clock.h"
+#include "base/const.h"
 #include "base/coordinates.h"
 #include "base/win32/win_util.h"
 #include "client/client_interface.h"
@@ -72,7 +73,6 @@ const POINT kInvalidMousePosition = {-65535, -65535};
 WindowManager::WindowManager()
     : dopagaki_state_(std::make_unique<DopagakiState>()),
       dopagaki_overlay_(std::make_unique<DopagakiOverlay>()),
-      dopagaki_sound_(std::make_unique<DopagakiSound>()),
       main_window_(std::make_unique<CandidateWindow>()),
       cascading_window_(std::make_unique<CandidateWindow>()),
       indicator_window_(std::make_unique<IndicatorWindow>()),
@@ -124,7 +124,6 @@ void WindowManager::DestroyAllWindows() {
     infolist_window_->DestroyWindow();
   }
   dopagaki_overlay_->Destroy();
-  dopagaki_sound_->Shutdown();
 }
 
 void WindowManager::HideAllWindows() {
@@ -487,8 +486,7 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
       sound_kind = DopagakiSoundKind::kBreak;
     }
   }
-  dopagaki_sound_->Play(dopagaki_sound_set_, sound_kind,
-                        dopagaki_state_->rank());
+  RequestDopagakiSound(event.receiver_window_handle(), sound_kind);
 
   const HWND target_window =
       WinUtil::DecodeWindowHandle(event.target_window_handle());
@@ -548,6 +546,28 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
     effects.HideComboLabel();
   }
   dopagaki_overlay_->StartAnimation();
+}
+
+void WindowManager::RequestDopagakiSound(uint32_t receiver_window_handle,
+                                         DopagakiSoundKind kind) {
+  if (dopagaki_sound_set_ == config::Config::DopagakiConfig::MUTE) {
+    return;
+  }
+  const HWND receiver = WinUtil::DecodeWindowHandle(receiver_window_handle);
+  if (receiver == nullptr) {
+    return;
+  }
+  // The same message as the renderer callback (e.g. clicking a candidate),
+  // which the TIP accepts from this sandboxed process.
+  static const UINT message =
+      ::RegisterWindowMessageW(kMessageReceiverMessageName);
+  if (message == 0) {
+    return;
+  }
+  ::PostMessageW(receiver, message, kDopagakiSoundRequest,
+                 EncodeDopagakiSoundRequest(
+                     dopagaki_sound_set_, kind,
+                     static_cast<int>(dopagaki_state_->rank())));
 }
 
 std::optional<DopagakiRect> WindowManager::GetDopagakiCandidateWindowRect()

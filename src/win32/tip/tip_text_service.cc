@@ -62,6 +62,7 @@
 #include "win32/tip/tip_display_attributes.h"
 #include "win32/tip/tip_dll_module.h"
 #include "win32/tip/tip_dopagaki.h"
+#include "win32/tip/tip_dopagaki_sound.h"
 #include "win32/tip/tip_edit_session.h"
 #include "win32/tip/tip_edit_session_impl.h"
 #include "win32/tip/tip_enum_display_attributes.h"
@@ -493,6 +494,12 @@ class TipTextServiceImpl
     thread_context_.reset();
     StorePointerForCurrentThread(nullptr);
 
+    // Dopagaki: shuts down the sound engine with the last text service.
+    if (dopagaki_sound_active_) {
+      dopagaki_sound_active_ = false;
+      TipDopagakiSound::OnDeactivate();
+    }
+
     return S_OK;
   }
   STDMETHODIMP ActivateEx(ITfThreadMgr* thread_mgr, TfClientId client_id,
@@ -504,6 +511,11 @@ class TipTextServiceImpl
     }
     thread_context_ = std::make_unique<TipThreadContext>();
     StorePointerForCurrentThread(this);
+    // Dopagaki: balanced by Deactivate().
+    if (!dopagaki_sound_active_) {
+      dopagaki_sound_active_ = true;
+      TipDopagakiSound::OnActivate();
+    }
 
     HRESULT result = E_UNEXPECTED;
 
@@ -1422,6 +1434,10 @@ class TipTextServiceImpl
         ::RegisterWindowMessage(mozc::kMessageReceiverMessageName);
     if (window_handle == self->renderer_callback_window_handle_) {
       if (message == renderer_callback_message) {
+        // Dopagaki: a sound requested by the renderer.
+        if (TipDopagaki::OnRendererCallback(wparam, lparam)) {
+          return 0;
+        }
         self->OnRendererCallback(wparam, lparam);
         return 0;
       }
@@ -1487,6 +1503,8 @@ class TipTextServiceImpl
   std::unique_ptr<TipThreadContext> thread_context_;
   HWND task_window_handle_;
   HWND renderer_callback_window_handle_;
+  // Dopagaki: whether TipDopagakiSound::OnActivate() was called.
+  bool dopagaki_sound_active_ = false;
 };
 
 }  // namespace

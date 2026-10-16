@@ -56,6 +56,10 @@ message DopagakiEvent {
   optional uint32 target_window_handle = 5;
   // Set only when the settings are changed from the menu.
   optional mozc.config.Config.DopagakiConfig settings = 6;
+  // The renderer callback window of the TIP (WinUtil::EncodeWindowHandle).
+  // The sandboxed renderer cannot play sounds, so it asks the TIP through
+  // this window.
+  optional uint32 receiver_window_handle = 7;
 }
 
 message RendererCommand {

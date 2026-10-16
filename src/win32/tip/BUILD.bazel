@@ -205,6 +205,7 @@ mozc_cc_library(
         ":tip_display_attributes",
         ":tip_dll_module",
         ":tip_dopagaki",
+        ":tip_dopagaki_sound",
         ":tip_edit_session",
         ":tip_enum_display_attributes",
         ":tip_input_mode_manager",
@@ -246,15 +247,31 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":tip_dopagaki_sound",
         ":tip_input_mode_manager",
         ":tip_status",
         ":tip_text_service",
         ":tip_thread_context",
         "//base/win32:win_util",
         "//protocol:renderer_cc_proto",
+        "//renderer/win32:dopagaki_sound_synth",
         "//renderer/win32:win32_renderer_client",
         "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
+    ],
+)
+
+# Dopagaki: plays the sound effects requested by the renderer.
+mozc_cc_library(
+    name = "tip_dopagaki_sound",
+    srcs = ["tip_dopagaki_sound.cc"],
+    hdrs = ["tip_dopagaki_sound.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//bazel/win32:xaudio2",
+        "//protocol:config_cc_proto",
+        "//renderer/win32:dopagaki_sound_synth",
     ],
 )
 
