@@ -203,7 +203,8 @@ TIP とレンダラーの間には、**古い命令を新しい命令で上書�
         │                                                ├ WindowManager（既存）：候補ウィンドウの位置を共有
         ▼                                                ├ CandidateWindow（既存を改造）：ダーク・角丸・グラデ
  Win32RendererClient::OnDopagakiEvent（新規）            ├ DopagakiOverlay（新規）：全画面の透明ウィンドウ
-  ・既存の命令とは別枠で保持して送る                       └ DopagakiSound（新規）：XAudio2 で効果音
+  ・既存の命令とは別枠で保持して送る                       └ 効果音の依頼（TIP のコールバックウィンドウへ PostMessage）
+ TipDopagakiSound（新規）：XAudio2 で効果音（4.8）
 ```
 
 ### 4.1 送る情報（`protocol/renderer_command.proto` に追加）
@@ -311,11 +312,15 @@ optional DopagakiConfig dopagaki_config = 7000;
 - 角丸は `OnCreate` などで `DwmSetWindowAttribute` を呼ぶ。
 - 外枠の光・虹の枠・`x42` は**オーバーレイ側**で描く（ウィンドウの外にはみ出すため）。そのために `WindowManager::UpdateLayout` で決めた候補ウィンドウの位置（`main_window_rect`）と表示中かどうかを覚えておき、オーバーレイに渡す。
 
-### 4.8 効果音（新規 `renderer/win32/dopagaki_sound.{h,cc}`）
+### 4.8 効果音（`renderer/win32/dopagaki_sound_synth.{h,cc}` ＋ `win32/tip/tip_dopagaki_sound.{h,cc}`）
 
-- XAudio2（`XAudio2Create` → マスタリングボイス → ソースボイスを16個ほど用意して使い回す）。モノラル float、48kHz。
-- 2.5節の表をそのまま `tone` / `noise` の組み合わせで合成して、空いているボイスで鳴らす。
-- 初期化に失敗したら音だけ止める。
+- **フェーズ5で判明：レンダラーでは音を鳴らせない。** レンダラーは Mozc のサンドボックス（Low 整合性・制限トークン）で動いていて、`CreateMasteringVoice` が `E_ACCESSDENIED`（0x80070005）になる。サンドボックスはゆるめず、次の形にした（こーた承認済み）：
+  1. TIP は `DopagakiEvent.receiver_window_handle` に自分のレンダラー用コールバックウィンドウ（`renderer_callback_window_handle()`）を入れて送る。
+  2. レンダラーは鳴らす音（1打・ランクアップ・BREAK）を決め、そのウィンドウに `kMessageReceiverMessageName` のメッセージを `PostMessage` する（WPARAM＝`kDopagakiSoundRequest`、LPARAM＝`EncodeDopagakiSoundRequest(音の種類, 何の音, ランク)`）。このメッセージは候補のマウス選択で使っているもので、TIP は `ChangeMessageFilter` 済みなので Low 整合性からでも届く。
+  3. TIP のコールバックウィンドウの処理（`RendererCallbackWidnowProc`）で `TipDopagaki::OnRendererCallback` が受け取り、`TipDopagakiSound::Play` がアプリのプロセス内で鳴らす。
+- 合成（`dopagaki_sound_synth`）は Windows API を使わない純粋なロジック。2.5節の表をそのまま `tone` / `noise` の組み合わせで合成（矩形波・のこぎり波は PolyBLEP でエイリアスを減らす。ハイパスは Web Audio と同じ双二次・Q=1dB）。テストあり。
+- 再生（`tip_dopagaki_sound`）：XAudio2、モノラル float 48kHz、ソースボイス16個を使い回す。プロセスに1つ、最初の音で作る。XAudio2 にコールバックは登録しない（DLL の中を呼ばせない）。サンプルはプロセスヒープに置く（DLL が外れても無効なメモリを読ませない）。最後のテキストサービスが `Deactivate` されたら止める（DllMain では止めない）。
+- 初期化に3回失敗したら、そのプロセスでは音だけ止める。
 
 ### 4.9 設定メニュー（TIP）
 
@@ -602,6 +607,11 @@ jobs:
   - 外枠の光と「x42」はオーバーレイで描く。**K4 と同じく3秒で消える**ようにした（候補ウィンドウ自体の色はそのまま）。SSS の虹の枠は、角丸の枠を4方向に切り分けて各辺の線形グラデーションで近似。
   - 候補ウィンドウの揺れ：`UpdateLayout` で決めた位置（揺れなし）を覚えておき、オーバーレイの毎フレームの呼び出し（`SetFrameCallback`）で同じだけずらす。SSS の選択行は約30fpsで色相に合わせて描き直す。
   - エラーのログは無し。約9分試したあとのレンダラー：CPU 時間 約32秒（フェーズ3より多い。候補ウィンドウの描き直しと枠の描画が増えたため）、メモリ 約104MB。**フェーズ7で CPU を測って、必要なら減らす**。
+- 2026-10-16：**フェーズ5 完了**（こーた OK 済み：1打ごとの音・ランクアップの音・BREAK の音・速く打っても途切れない・Windows の音量に従う・入力と変換は普通、すべて確認。インストーラーは run 12、`3.34.6345.1120`）。
+  - 1回目（run 11）は**音が鳴らなかった**：レンダラーのサンドボックスで `CreateMasteringVoice` が `E_ACCESSDENIED`。こーたと相談し、サンドボックスはゆるめずに「TIP で鳴らす」形に変えた（4.8参照）。
+  - run 10 は `mmreg.h` を `windows.h` より先に読んでコンパイルエラー（`xaudio2.h` を `windows.h` の後に置いて解決）。
+  - 音の種類は今は「ピコピコ」固定（`WindowManager::dopagaki_sound_set_`）。フェーズ6でメニューから変える。
+  - 残している小さな宿題：XAudio2 の既定デバイスが変わったとき（イヤホンを抜き差ししたときなど）の作り直しは、送信の失敗でしか検知していない。フェーズ7で確認する。
   - K4 はこーた確認済み（案どおり。消えるのは1秒かけて）。
   - `dopagaki_effects` にふちの状態（ランク・t・最後の打鍵からの時間）と火花を追加。テストは計26ケース。
   - 描き方：canvas の `shadowBlur` の代わりに、内側へ薄くなる16本の帯で光を描く。SSS の回る虹（canvas の conic gradient）は、各辺に沿った13色の線形グラデーションで近似。光（影）の色は SSS では `hsl(hue, 100%, 60%)` の1色（プレビューと同じ）。
