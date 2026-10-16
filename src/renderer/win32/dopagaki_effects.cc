@@ -288,8 +288,12 @@ float DopagakiEffects::edge_opacity() const {
   if (idle_ms_ <= kEdgeIdleMs) {
     return 1;
   }
-  return static_cast<float>(
-      std::max(0.0, 1 - (idle_ms_ - kEdgeIdleMs) / kEdgeFadeMs));
+  const double faded = (idle_ms_ - kEdgeIdleMs) / kEdgeFadeMs;
+  // A tiny remainder from adding up frame times counts as fully faded out.
+  if (faded >= 1 - 1e-6) {
+    return 0;
+  }
+  return static_cast<float>(1 - faded);
 }
 
 bool DopagakiEffects::IsEdgeVisible() const {
