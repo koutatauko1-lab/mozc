@@ -1,3 +1,33 @@
+ドパガキIME（Mozc のフォーク）
+==============================
+
+打つたびにコンボが増え、ランク（B → A → S → SS → SSS）が上がるほど画面が派手になる、Windows 用の日本語入力です。
+変換のしくみは [Mozc](https://github.com/google/mozc) そのままで、演出と効果音を足しています。
+
+- 1打ごとに火花が飛び、効果音が鳴ります。ランクが上がるとバナーと花火、BackSpace で「BREAK」。
+- 画面のふちが光り、候補ウィンドウが虹色の枠と「x42」のコンボ表示つきになります。3秒打たないと静かに消えます。
+- タスクバーの「あ」を右クリックすると、効果音（7種類）と演出の ON/OFF を切り替えられます。設定は再起動しても残ります。
+- 数えるのは打った「回数」だけです。打った文字の内容は保存も送信もしません。パスワード欄では数えません。
+
+### 入れ方
+
+1. このリポジトリの [Actions](https://github.com/koutatauko1-lab/mozc/actions/workflows/windows.yaml) で、いちばん新しい成功したビルドを開き、`Mozc64_x64.msi` をダウンロードします（GitHub へのログインが必要です）。
+2. ダウンロードした zip を展開し、中の `Mozc64.msi` を開きます。管理者の確認画面が出たら「はい」を押します。
+3. インストールが終わったら PC を再起動します。
+4. Win＋スペースで「ドパガキIME」を選びます。
+
+消すときは、Windows の設定 →「アプリ」→「ドパガキIME」→「アンインストール」です。
+
+### このフォークについて
+
+- 仕様・設計・進捗は [DOPAGAKI.md](DOPAGAKI.md)、演出と効果音の見本は [docs/dopagaki/preview.html](docs/dopagaki/preview.html) にあります。
+- ビルドは GitHub Actions（`.github/workflows/windows.yaml`）で行います。
+- ライセンスは Mozc と同じ BSD 3-Clause です（[LICENSE](LICENSE)）。Mozc と Google はこのフォークとは関係ありません。
+
+以下は、もとの Mozc の README です。
+
+---
+
 [Mozc - a Japanese Input Method Editor designed for multi-platform](https://github.com/google/mozc)
 ===================================
 

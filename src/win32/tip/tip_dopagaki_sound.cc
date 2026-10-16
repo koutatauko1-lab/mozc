@@ -32,6 +32,10 @@ using ::mozc::renderer::win32::SynthesizeDopagakiSound;
 
 // The number of sounds that can play at the same time.
 constexpr size_t kVoiceCount = 16;
+// Every sound is shorter than about one second. A sound still queued after
+// this long means that the engine stopped, e.g. because the audio device was
+// removed. Without an engine callback, this is how it is noticed.
+constexpr ULONGLONG kStalledSoundMs = 3000;
 // Audio is turned off in this process after this many failures to start it.
 constexpr int kMaxFailures = 3;
 
@@ -99,12 +103,24 @@ class Engine {
 
   // Returns false on an error (the engine should be created again).
   bool Play(const std::vector<float>& samples) {
+    const ULONGLONG now = ::GetTickCount64();
+    Slot* free_slot = nullptr;
     for (Slot& slot : slots_) {
       XAUDIO2_VOICE_STATE state = {};
       slot.voice->GetState(&state, XAUDIO2_VOICE_NOSAMPLESPLAYED);
-      if (state.BuffersQueued > 0) {
+      if (state.BuffersQueued == 0) {
+        if (free_slot == nullptr) {
+          free_slot = &slot;
+        }
         continue;
       }
+      if (now - slot.submitted_ms > kStalledSoundMs) {
+        Log(L"engine stalled", E_FAIL);
+        return false;
+      }
+    }
+    if (free_slot != nullptr) {
+      Slot& slot = *free_slot;
       FreeSamples(&slot);
       const size_t bytes = samples.size() * sizeof(float);
       slot.samples = ::HeapAlloc(::GetProcessHeap(), 0, bytes);
@@ -121,6 +137,7 @@ class Engine {
         Log(L"SubmitSourceBuffer failed", hr);
         return false;
       }
+      slot.submitted_ms = now;
       return true;
     }
     // All voices are busy. This sound is skipped.
@@ -131,6 +148,8 @@ class Engine {
   struct Slot {
     IXAudio2SourceVoice* voice = nullptr;
     void* samples = nullptr;
+    // When the last sound was submitted (GetTickCount64).
+    ULONGLONG submitted_ms = 0;
   };
 
   static void FreeSamples(Slot* slot) {
