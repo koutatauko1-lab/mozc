@@ -23,15 +23,21 @@ body {
   overflow: hidden; margin: 0;
 }
 #field { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+/* Update 1: praise words and their shockwave rings are drawn above the desk, like the real overlay. */
+#praise { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }
 #flash { position: fixed; inset: 0; background: var(--break); opacity: 0; pointer-events: none; z-index: 5; mix-blend-mode: screen; }
+#flashWhite { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 5; mix-blend-mode: screen; }
 #banner {
-  position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 6;
-  font-family: var(--font-display); text-align: center; line-height: 1;
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 6; font-family: var(--font-display); text-align: center; line-height: 1;
 }
-#banner span { display: block; opacity: 0; font-size: clamp(64px, 18vw, 220px); letter-spacing: .02em; white-space: nowrap; }
+#banner span { display: block; opacity: 0; letter-spacing: .02em; white-space: nowrap; }
+#bannerText { font-size: clamp(64px, 18vw, 220px); }
+#bannerText.milestone { font-size: clamp(56px, 14vw, 180px); }
+#bannerSub { font-size: clamp(26px, 6vw, 76px); margin-top: .15em; color: #fff; }
 #stage {
   position: relative; z-index: 3; height: 100%; box-sizing: border-box;
-  display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center;
   padding-block: 20px;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
@@ -75,17 +81,21 @@ textarea {
 .ladder { display: flex; gap: 6px; font: 600 11px var(--font-hud); color: var(--muted); flex-wrap: wrap; }
 .ladder span { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; }
 .ladder span.on { color: #fff; border-color: currentColor; }
+.last { margin: 0; min-height: 1.5em; font: 600 12px var(--font-body); color: var(--muted); text-align: center; }
+.last b { color: var(--fg); font-family: var(--font-hud); }
 .note { color: var(--muted); font-size: 12px; text-align: center; margin: 0; max-width: 60ch; }
 </style>
 
 <canvas id="field"></canvas>
+<canvas id="praise"></canvas>
 <div id="flash"></div>
-<div id="banner"><span id="bannerText"></span></div>
+<div id="flashWhite"></div>
+<div id="banner"><span id="bannerText"></span><span id="bannerSub"></span></div>
 
 <main id="stage">
   <header>
     <h1>ドパガキIME 演出プレビュー</h1>
-    <p>下の入力欄で何か打ってみて。BackSpaceでBREAK。</p>
+    <p>下の入力欄で何か打ってみて。5コンボごとに褒め言葉、BackSpaceでBREAK。</p>
   </header>
 
   <div class="controls">
@@ -99,11 +109,17 @@ textarea {
       <option value="mecha">メカ（レーザー）</option>
       <option value="off">ミュート</option>
     </select>
-    <button id="demo" type="button">自動デモ（SSSまで）</button>
+    <button id="demo" type="button">自動デモ（200コンボまで）</button>
     <button id="reset" type="button">リセット</button>
   </div>
 
-  <div class="desk">
+  <div class="controls">
+    <label for="praiseStyle">褒め言葉の演出</label>
+    <select id="praiseStyle"><option value="">おまかせ</option></select>
+    <button id="praiseTest" type="button">1回だけ出す</button>
+  </div>
+
+  <div class="desk" id="desk">
     <div class="hud">
       <div class="rank-box"><div class="rank" id="rank">B</div><div class="combo"><span id="combo">0</span><small>COMBO</small></div></div>
       <div class="ladder" id="ladder"><span data-r="B">B 0〜</span><span data-r="A">A 10〜</span><span data-r="S">S 30〜</span><span data-r="SS">SS 50〜</span><span data-r="SSS">SSS 100〜</span></div>
@@ -114,7 +130,8 @@ textarea {
       <div class="cand"><ol id="candList"></ol></div>
     </div>
   </div>
-  <p class="note">本物はMozcの変換候補ウィンドウと画面全体に、これと同じ演出が出る想定。スマホは自動デモで見てね。</p>
+  <p class="last" id="lastPraise">直前の褒め言葉：まだ出てないわ</p>
+  <p class="note">本物はMozcの変換候補ウィンドウと画面全体に、これと同じ演出が出る想定。200・300…コンボで特大版。スマホは自動デモで見てね。</p>
 </main>
 
 <script>
@@ -133,8 +150,12 @@ textarea {
 
   // ---------- canvas particles ----------
   const cv = $("field"), cx = cv.getContext("2d");
+  const pv = $("praise"), px = pv.getContext("2d");
   let W = 0, H = 0, dpr = 1;
-  const resize = () => { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0); };
+  const resize = () => {
+    dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+    for (const [c, g] of [[cv, cx], [pv, px]]) { c.width = W * dpr; c.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  };
   addEventListener("resize", resize); resize();
   const parts = [];
   const colorFor = () => RANKS[rankIdx].color === "rainbow" ? `hsl(${(hue + Math.random() * 120) % 360} 100% 62%)` : RANKS[rankIdx].color;
@@ -142,7 +163,7 @@ textarea {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, s = (opts.speed || 6) * (0.4 + Math.random());
       parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - (opts.lift || 1.5), life: 1, decay: 0.012 + Math.random() * 0.02,
-        size: (opts.size || 3) * (0.5 + Math.random()), color: opts.color || colorFor(), shard: !!opts.shard, rot: Math.random() * 6 });
+        size: (opts.size || 3) * (0.5 + Math.random()), color: opts.colorFn ? opts.colorFn() : (opts.color || colorFor()), shard: !!opts.shard, rot: Math.random() * 6 });
     }
   }
   // ---------- bezel glow + sparks ----------
@@ -209,31 +230,39 @@ textarea {
     }
     cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
     drawEdge();
-    // shake
+    // shake (the real overlay shakes everything it draws, praise words included)
+    let shakeX = 0, shakeY = 0;
     if (shakeAmt > 0.2 && !reduce) {
-      stage.style.transform = `translate(${(Math.random() - .5) * shakeAmt * 2}px, ${(Math.random() - .5) * shakeAmt * 2}px)`;
+      shakeX = (Math.random() - .5) * shakeAmt * 2; shakeY = (Math.random() - .5) * shakeAmt * 2;
+      stage.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
       shakeAmt *= 0.86;
     } else { stage.style.transform = ""; shakeAmt = 0; }
+    drawPraises(performance.now(), shakeX, shakeY);
     // rainbow tint
     if (RANKS[rankIdx].color === "rainbow") root.style.setProperty("--rank", `hsl(${hue} 100% 62%)`);
     root.style.setProperty("--spin", `${hue}deg`);
     requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
 
   // ---------- banner ----------
-  const bannerText = $("bannerText");
-  let bannerAnim;
+  const bannerText = $("bannerText"), bannerSub = $("bannerSub");
+  let bannerAnim, bannerSubAnim;
+  function resetBanner() {
+    bannerAnim && bannerAnim.cancel(); bannerSubAnim && bannerSubAnim.cancel();
+    bannerText.className = ""; bannerText.style.background = ""; bannerText.style.webkitBackgroundClip = ""; bannerText.style.backgroundClip = "";
+    bannerText.style.filter = ""; bannerSub.textContent = "";
+  }
   function showBanner(text, color, kind) {
+    resetBanner();
     bannerText.textContent = text;
     bannerText.style.color = color;
     bannerText.style.textShadow = `0 0 30px ${color}, 0 0 80px ${color}, 0 6px 0 #000`;
-    bannerAnim && bannerAnim.cancel();
     const frames = kind === "break"
       ? [{ opacity: 0, transform: "scale(2.4) rotate(-4deg)" }, { opacity: 1, transform: "scale(1) rotate(-4deg)", offset: .12 }, { opacity: 1, transform: "scale(1.04) rotate(-4deg)", offset: .7 }, { opacity: 0, transform: "scale(.9) translateY(30px) rotate(-6deg)" }]
       : [{ opacity: 0, transform: "scale(.3)" }, { opacity: 1, transform: "scale(1.15)", offset: .18 }, { opacity: 1, transform: "scale(1)", offset: .7 }, { opacity: 0, transform: "scale(1.6)" }];
     bannerAnim = bannerText.animate(frames, { duration: kind === "break" ? 1100 : 1000, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" });
   }
+  const bannerActive = () => !!bannerAnim && bannerAnim.playState === "running";
 
   // ---------- sound (synthesized, 6 sets) ----------
   let ac;
@@ -251,18 +280,419 @@ textarea {
     s.buffer = b; f.type = "highpass"; f.frequency.value = hp; g.gain.value = vol;
     s.connect(f).connect(g).connect(ac.destination); s.start(t);
   }
+  // Update 1: praise(r, d) is the short fanfare of a praise word. p raises the pitch 2 semitones per rank.
+  const P = r => Math.pow(2, 2 * r / 12);
   const SOUNDS = {
-    pico:    { key: r => tone("square", 660 + r * 120 + Math.random() * 80, 880 + r * 160, .06, .06), up: () => [523, 659, 784, 1046].forEach((f, i) => tone("square", f, f, .09, .07, i * .07)), brk: () => tone("square", 440, 55, .5, .09) },
-    type:    { key: () => noise(.03, .35, 2500), up: () => { tone("sine", 1760, 1760, .6, .12); tone("sine", 2637, 2637, .5, .05); }, brk: () => { noise(.25, .5, 300); tone("triangle", 180, 60, .35, .12); } },
-    hit:     { key: r => { tone("sine", 160 + r * 20, 50, .09, .25); noise(.04, .18, 1800); }, up: () => { tone("sine", 90, 40, .4, .35); noise(.3, .3, 600); }, brk: () => { noise(.5, .55, 200); tone("sawtooth", 220, 40, .6, .12); } },
-    taiko:   { key: r => tone("sine", 140 + r * 15, 70, .16, .35), up: () => [0, .14, .28].forEach(d => tone("sine", 110, 55, .3, .45, d)), brk: () => { tone("sine", 90, 35, .9, .5); noise(.15, .2, 900, .02); } },
-    sparkle: { key: r => tone("sine", 1500 + Math.random() * 900 + r * 200, 2400 + r * 200, .09, .05), up: () => [1046, 1318, 1568, 2093, 2637].forEach((f, i) => tone("sine", f, f, .25, .06, i * .05)), brk: () => [1568, 1174, 880, 587].forEach((f, i) => tone("triangle", f, f * .7, .2, .07, i * .08)) },
-    mecha:   { key: r => tone("sawtooth", 1400 + r * 200, 300, .07, .04), up: () => { tone("sawtooth", 200, 2400, .35, .06); tone("square", 300, 3000, .35, .03); }, brk: () => { tone("sawtooth", 1800, 40, .6, .08); noise(.4, .3, 500); } },
+    pico:    { key: r => tone("square", 660 + r * 120 + Math.random() * 80, 880 + r * 160, .06, .06), up: () => [523, 659, 784, 1046].forEach((f, i) => tone("square", f, f, .09, .07, i * .07)), brk: () => tone("square", 440, 55, .5, .09),
+               praise: (r, d = 0) => { const p = P(r); tone("square", 988 * p, 988 * p, .06, .06, d); tone("square", 1319 * p, 1319 * p, .12, .07, d + .06); } },
+    type:    { key: () => noise(.03, .35, 2500), up: () => { tone("sine", 1760, 1760, .6, .12); tone("sine", 2637, 2637, .5, .05); }, brk: () => { noise(.25, .5, 300); tone("triangle", 180, 60, .35, .12); },
+               praise: (r, d = 0) => { const p = P(r); tone("sine", 2093 * p, 2093 * p, .35, .09, d); tone("sine", 4186 * p, 4186 * p, .2, .03, d); } },
+    hit:     { key: r => { tone("sine", 160 + r * 20, 50, .09, .25); noise(.04, .18, 1800); }, up: () => { tone("sine", 90, 40, .4, .35); noise(.3, .3, 600); }, brk: () => { noise(.5, .55, 200); tone("sawtooth", 220, 40, .6, .12); },
+               praise: (r, d = 0) => { for (const t of [0, .09]) { tone("sine", 180 + r * 20, 50, .08, .3, d + t); noise(.05, .22, 1500, d + t); } } },
+    taiko:   { key: r => tone("sine", 140 + r * 15, 70, .16, .35), up: () => [0, .14, .28].forEach(d => tone("sine", 110, 55, .3, .45, d)), brk: () => { tone("sine", 90, 35, .9, .5); noise(.15, .2, 900, .02); },
+               praise: (r, d = 0) => { tone("sine", 150 + r * 15, 70, .15, .4, d); noise(.04, .25, 3000, d + .12); } },
+    sparkle: { key: r => tone("sine", 1500 + Math.random() * 900 + r * 200, 2400 + r * 200, .09, .05), up: () => [1046, 1318, 1568, 2093, 2637].forEach((f, i) => tone("sine", f, f, .25, .06, i * .05)), brk: () => [1568, 1174, 880, 587].forEach((f, i) => tone("triangle", f, f * .7, .2, .07, i * .08)),
+               praise: (r, d = 0) => { const p = P(r); [2637, 3136, 3951].forEach((f, i) => tone("sine", f * p, f * p, .15, .05, d + i * .04)); } },
+    // The key sound of Mecha is 0.08 (twice the first recipe), as in the installed IME.
+    mecha:   { key: r => tone("sawtooth", 1400 + r * 200, 300, .07, .08), up: () => { tone("sawtooth", 200, 2400, .35, .06); tone("square", 300, 3000, .35, .03); }, brk: () => { tone("sawtooth", 1800, 40, .6, .08); noise(.4, .3, 500); },
+               praise: (r, d = 0) => { const p = P(r); tone("sawtooth", 600 * p, 1800 * p, .12, .05, d); tone("square", 1800 * p, 1800 * p, .08, .03, d + .1); } },
   };
   const sel = $("sound");
   try { const saved = localStorage.getItem("dopagaki-sound"); if (saved && (saved in SOUNDS || saved === "off")) sel.value = saved; } catch (e) {}
   sel.addEventListener("change", () => { try { localStorage.setItem("dopagaki-sound", sel.value); } catch (e) {} if (ensureAudio() && SOUNDS[sel.value]) SOUNDS[sel.value].up(); });
-  const play = (which) => { const s = SOUNDS[sel.value]; if (!s || !ensureAudio()) return; try { s[which](rankIdx); } catch (e) {} };
+  const withSound = fn => { const s = SOUNDS[sel.value]; if (!s || !ensureAudio()) return; try { fn(s); } catch (e) {} };
+  const play = which => withSound(s => s[which](rankIdx));
+  // One sound per keystroke, in this priority: BREAK > milestone > rank-up (+ praise) > praise > key.
+  const playPraise = (d = 0) => withSound(s => s.praise(rankIdx, d));
+  const playRankUpPraise = () => withSound(s => { s.up(); s.praise(rankIdx, .25); });
+  const playMilestone = () => withSound(s => { s.up(); s.praise(4, .32); s.praise(4, .5); });
+
+  // ---------- praise words (update 1) ----------
+  const PRAISE_WORDS = [
+    ["Nice!", "Good!", "Cool!", "Sweet!", "Nice one!", "Let's go!", "Good start!", "Warming up!"],
+    ["Great!", "Awesome!", "Smooth!", "Well done!", "Way to go!", "Keep it up!", "You got this!", "Go go go!", "Nice combo!", "Looking good!"],
+    ["Excellent!", "Amazing!", "Fantastic!", "Superb!", "Brilliant!", "Impressive!", "Outstanding!", "On fire!", "So good!", "Keep rolling!"],
+    ["Incredible!", "Unbelievable!", "Spectacular!", "Phenomenal!", "Magnificent!", "Insane!", "Wild!", "Beast mode!", "Crushing it!", "Too fast!", "Don't stop!", "No way!"],
+    ["GODLIKE!!", "LEGENDARY!!", "UNSTOPPABLE!!", "PERFECT!!", "GENIUS!!", "MASTERPIECE!!", "MYTHICAL!!", "UNREAL!!", "SUPREME!!", "MIND-BLOWING!!", "OUT OF THIS WORLD!!", "HALL OF FAME!!", "TYPING GOD!!", "ABSOLUTE LEGEND!!"],
+  ];
+  const MILESTONE_WORDS = ["BEYOND SSS!", "ASCENDED!", "TRANSCENDENT!", "INFINITE POWER!", "KEYBOARD MASTER!", "RECORD BREAKER!", "NO LIMITS!", "ULTIMATE!"];
+  const PRAISE_SIZE = [56, 64, 74, 86, 100];     // px on a 1920 px wide monitor
+  const PRAISE_BURST = [6, 10, 16, 24, 36];
+  const PRAISE_IMPACT_BURST = [8, 12, 18, 26, 36];
+  const PRAISE_SHAKE = [1, 2, 3, 5, 7];
+  const MAX_PRAISES = 3;
+  // rank color, white, complement, gold, rainbow
+  const COLOR_WEIGHTS = [[60, 25, 15, 0, 0], [45, 25, 20, 10, 0], [35, 20, 15, 20, 10], [25, 15, 15, 25, 20], [20, 10, 10, 30, 30]];
+  const COLOR_NAMES = ["ランク色", "白く光る", "反対色", "金", "虹"];
+  const COMPLEMENT = ["#ffa64d", "#e33ba6", "#3f6cff", "#4fff76", null];
+
+  function bez(x1, y1, x2, y2) {
+    const sample = (a1, a2, t) => { const u = 1 - t; return 3 * u * u * t * a1 + 3 * u * t * t * a2 + t * t * t; };
+    const deriv = (a1, a2, t) => { const u = 1 - t; return 3 * u * u * a1 + 6 * u * t * (a2 - a1) + 3 * t * t * (1 - a2); };
+    return t => {
+      if (t <= 0) return 0; if (t >= 1) return 1;
+      let u = t;
+      for (let i = 0; i < 8; i++) {
+        const e = sample(x1, x2, u) - t; if (Math.abs(e) < 1e-6) return sample(y1, y2, u);
+        const d = deriv(x1, x2, u); if (Math.abs(d) < 1e-6) break; u -= e / d;
+      }
+      let lo = 0, hi = 1; u = t;
+      for (let i = 0; i < 40; i++) { const x = sample(x1, x2, u); if (Math.abs(x - t) < 1e-6) break; if (x < t) lo = u; else hi = u; u = (lo + hi) / 2; }
+      return sample(y1, y2, u);
+    };
+  }
+  const EASE = { lin: t => t, in: bez(.42, 0, 1, 1), out: bez(0, 0, .58, 1), io: bez(.42, 0, .58, 1), back: bez(.34, 1.56, .64, 1) };
+  // Each property has its own keyframes: [t (0..1 of the duration), value, easing of the segment that starts here].
+  function track(keys, t, def) {
+    if (!keys) return def;
+    if (t <= keys[0][0]) return keys[0][1];
+    for (let i = 0; i < keys.length - 1; i++) {
+      const a = keys[i], b = keys[i + 1];
+      if (t <= b[0]) { const u = (t - a[0]) / ((b[0] - a[0]) || 1); return a[1] + (b[1] - a[1]) * EASE[a[2] || "lin"](u); }
+    }
+    return keys[keys.length - 1][1];
+  }
+
+  // The 12 styles. Units: px, degrees, ms. x and k of "slide" are mirrored for the side of the screen it comes from.
+  const STYLES = [
+    { id: "pop", name: "ポンッ", font: "900 {S}px 'Arial Black', 'Dela Gothic One', sans-serif", dur: 1300,
+      tr: { o: [[0, 0], [.1, 1], [.8, 1, "in"], [1, 0]], s: [[0, .2, "out"], [.14, 1.25, "io"], [.24, .95, "io"], [.32, 1], [.8, 1, "in"], [1, 1.15]] },
+      fx: [[0, "burst"]] },
+    { id: "slam", name: "ドンッ", font: "{S}px Impact, 'Dela Gothic One', sans-serif", dur: 1300,
+      tr: { o: [[0, 0], [.06, 1], [.8, 1, "in"], [1, 0]], s: [[0, 3, "in"], [.1, .9, "out"], [.16, 1.08, "io"], [.22, 1], [.8, 1, "in"], [1, .9]], y: [[0, -40, "in"], [.1, 0], [.8, 0, "in"], [1, 10]] },
+      fx: [[.1, "impact"]] },
+    { id: "spin", name: "くるっ", font: "italic 900 {S}px 'Segoe UI', 'Dela Gothic One', sans-serif", dur: 1300, tilt: 5,
+      tr: { o: [[0, 0], [.12, 1], [.78, 1, "in"], [1, 0]], s: [[0, 0, "out"], [.22, 1.1, "io"], [.3, 1], [.78, 1, "in"], [1, .2]], r: [[0, -540, "out"], [.22, 10, "io"], [.3, 0], [.78, 0, "in"], [1, 360]] },
+      fx: [[.22, "burst"]] },
+    { id: "slide", name: "シュッ", font: "italic 700 {S}px Bahnschrift, 'Chakra Petch', sans-serif", stretch: "condensed", dur: 1300, side: true,
+      tr: { o: [[0, 0], [.08, 1], [.8, 1], [1, 0]], x: [[0, 420, "out"], [.16, -20, "io"], [.24, 0], [.8, 0, "in"], [1, -320]], k: [[0, 20, "out"], [.16, -8, "io"], [.24, 0], [.8, 0, "in"], [1, 15]] },
+      ghosts: [[35, .4], [70, .25], [105, .12]], fx: [[.16, "burst"]] },
+    { id: "drop", name: "ボヨン", font: "900 {S}px 'Arial Black', 'Dela Gothic One', sans-serif", dur: 1400, pivot: "bottom",
+      tr: { o: [[0, 0], [.06, 1], [.82, 1, "in"], [1, 0]],
+            y: [[0, -260, "in"], [.18, 0, "out"], [.26, -60, "in"], [.34, 0, "out"], [.4, -18, "in"], [.46, 0], [.82, 0, "in"], [1, 20]],
+            sx: [[0, .9], [.18, 1.25, "out"], [.26, .95], [.34, 1.12], [.4, 1], [.46, 1.05], [.52, 1]],
+            sy: [[0, 1.15], [.18, .75, "out"], [.26, 1.08], [.34, .88], [.4, 1], [.46, .95], [.52, 1]] },
+      fx: [[.18, "burst"]] },
+    { id: "rise", name: "ふわっ", font: "900 {S}px 'Segoe UI', 'Dela Gothic One', sans-serif", dur: 1500,
+      tr: { o: [[0, 0], [.18, 1, "out"], [.8, 1], [1, 0]], y: [[0, 30, "out"], [.18, 0], [1, -90]], s: [[0, .9, "out"], [.18, 1]],
+            r: [[0, -3, "io"], [.25, 3, "io"], [.5, -3, "io"], [.75, 3, "io"], [1, -3]] },
+      fx: [[0, "burst"]] },
+    { id: "jelly", name: "ぷるん", font: "700 {S}px 'Comic Sans MS', 'Dela Gothic One', sans-serif", dur: 1300, pivot: "bottom",
+      tr: { o: [[0, 0], [.06, 1], [.82, 1, "in"], [1, 0]],
+            sx: [[0, 0, "out"], [.12, 1.3, "io"], [.2, .8, "io"], [.28, 1.15, "io"], [.36, .93, "io"], [.44, 1.04, "io"], [.52, 1], [.82, 1, "in"], [1, 1.4]],
+            sy: [[0, 0, "out"], [.12, .7, "io"], [.2, 1.2, "io"], [.28, .85, "io"], [.36, 1.07, "io"], [.44, .96, "io"], [.52, 1], [.82, 1, "in"], [1, 0]] },
+      fx: [[.12, "burst"]] },
+    { id: "flip", name: "パタン", font: "{S}px Impact, 'Dela Gothic One', sans-serif", dur: 1300, backDim: .6,
+      tr: { o: [[0, 0], [.04, 1], [.82, 1, "in"], [1, 0]], sx: [[0, 0, "out"], [.1, -.85, "in"], [.18, 0, "out"], [.26, 1.1, "io"], [.32, 1], [.82, 1, "in"], [1, 0]] },
+      fx: [[.26, "burst"]] },
+    { id: "glitch", name: "バグッ", font: "700 {S}px Consolas, 'Chakra Petch', monospace", dur: 1300,
+      tr: { o: [[0, 0], [.03, 1], [.85, 1], [1, 0]] }, glitch: [[0, .28], [.8, 1]], fx: [[0, "burst"]] },
+    { id: "wave", name: "うねうね", font: "{S}px 'Ink Free', 'Segoe Print', 'Dela Gothic One', cursive", dur: 1500, letters: "wave", tilt: 5, sizeScale: 1.1, fx: [[0, "burst"]] },
+    { id: "scatter", name: "ババババ", font: "900 {S}px 'Arial Black', 'Dela Gothic One', sans-serif", dur: 1500, letters: "scatter", tilt: 5, fx: [] },
+    { id: "stamp", name: "ズドン", font: "{S}px Impact, 'Dela Gothic One', sans-serif", dur: 1300, tiltBase: -12, tilt: 4, frame: true,
+      tr: { o: [[0, 0], [.05, 1], [.82, 1, "in"], [1, 0]], s: [[0, 2.6, "in"], [.12, .92, "out"], [.18, 1.04, "io"], [.24, 1]] },
+      fx: [[.12, "impact"]] },
+  ];
+  // With the Windows animation setting off: only fades.
+  const FADE_STYLE = { id: "fade", name: "フェード", font: "900 {S}px 'Segoe UI', 'Dela Gothic One', sans-serif", dur: 1300, tilt: 0,
+    tr: { o: [[0, 0], [.15, 1], [.8, 1], [1, 0]] }, fx: [] };
+
+  const praiseSel = $("praiseStyle");
+  for (const s of STYLES) { const o = document.createElement("option"); o.value = s.id; o.textContent = s.name; praiseSel.appendChild(o); }
+
+  // No word comes again until all words of its rank were shown.
+  const bags = PRAISE_WORDS.map(() => []), lastWord = {};
+  const milestoneBag = [];
+  function nextFromBag(list, bag, key) {
+    if (!bag.length) {
+      const idx = list.map((_, i) => i);
+      for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+      if (idx.length > 1 && idx[idx.length - 1] === lastWord[key]) [idx[0], idx[idx.length - 1]] = [idx[idx.length - 1], idx[0]];
+      bag.push(...idx);
+    }
+    const i = bag.pop(); lastWord[key] = i; return list[i];
+  }
+  // Never the same style as the last two.
+  const recentStyles = [];
+  function pickStyle(forcedId) {
+    if (reduce) return FADE_STYLE;
+    let style = forcedId && STYLES.find(s => s.id === forcedId);
+    if (!style) { const pool = STYLES.filter(s => !recentStyles.includes(s.id)); style = pool[Math.floor(Math.random() * pool.length)]; }
+    recentStyles.push(style.id); if (recentStyles.length > 2) recentStyles.shift();
+    return style;
+  }
+  let lastColorKind = -1;
+  function pickColorKind(tier) {
+    const roll = () => { const w = COLOR_WEIGHTS[tier]; let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { if ((r -= w[i]) < 0) return i; } return 0; };
+    let k = roll(); if (k === lastColorKind) k = roll();
+    lastColorKind = k; return k;
+  }
+  function makePaint(kind, tier) {
+    const rankCol = tier === 4 ? `hsl(${hue} 100% 62%)` : RANKS[tier].color;
+    switch (kind) {
+      case 1: return { kind, fill: "#ffffff", glow: rankCol, particle: rankCol };
+      case 2: { const c = tier === 4 ? `hsl(${(hue + 180) % 360} 100% 62%)` : COMPLEMENT[tier]; return { kind, fill: c, glow: c, particle: c }; }
+      case 3: return { kind, fill: "gold", glow: "#ffb300", particle: "#ffd23f" };
+      case 4: { const h0 = hue; return { kind, fill: "rainbow", h0, glow: "#ffffff", particle: null }; }
+      default: return { kind: 0, fill: rankCol, glow: rankCol, particle: rankCol };
+    }
+  }
+  const particleColorFn = paint => paint.particle ? () => paint.particle : () => `hsl(${(paint.h0 + Math.random() * 300) % 360} 100% 62%)`;
+  function fillStyleFor(g, paint, x0, totalW, top, bottom) {
+    if (paint.fill === "gold") { const gr = g.createLinearGradient(0, top, 0, bottom); gr.addColorStop(0, "#fff7cc"); gr.addColorStop(.5, "#ffd23f"); gr.addColorStop(1, "#d18a0a"); return gr; }
+    if (paint.fill === "rainbow") { const gr = g.createLinearGradient(x0, 0, x0 + totalW, 0); for (let k = 0; k <= 6; k++) gr.addColorStop(k / 6, `hsl(${(paint.h0 + k * 50) % 360} 100% 62%)`); return gr; }
+    return paint.fill;
+  }
+  const measure = document.createElement("canvas").getContext("2d");
+  function setFont(g, font, size, stretch) { g.font = font.replace("{S}", size.toFixed(1)); if ("fontStretch" in g) g.fontStretch = stretch || "normal"; }
+  // Pre-renders text with its glow, like CreateGlowText of the overlay. |o.xi| and |o.totalW| place a letter inside the gradient of the whole word.
+  function makeSprite(text, style, size, paint, o) {
+    const c = document.createElement("canvas"), g = c.getContext("2d");
+    setFont(g, style.font, size, style.stretch);
+    const w = Math.max(1, g.measureText(text).width);
+    const [b1, b2] = o.plain ? [0, 0] : o.glow;
+    const sy = o.plain ? 0 : 4;
+    const pad = Math.ceil(Math.max(b1, b2) * 1.5 + sy + 6 + (style.frame ? 24 : 0));
+    const bw = w + pad * 2, bh = o.asc + o.desc + pad * 2;
+    c.width = Math.ceil(bw * dpr); c.height = Math.ceil(bh * dpr);
+    g.scale(dpr, dpr); setFont(g, style.font, size, style.stretch);
+    const ox = pad, oy = pad + o.asc, top = pad, bottom = pad + o.asc + o.desc;
+    const shape = (fill, dy = 0) => {
+      g.fillStyle = fill; g.fillText(text, ox, oy + dy);
+      if (style.frame) {
+        g.strokeStyle = fill; g.lineWidth = 5; g.beginPath();
+        if (g.roundRect) g.roundRect(ox - 18, top - 10 + dy, w + 36, o.asc + o.desc + 20, 12); else g.rect(ox - 18, top - 10 + dy, w + 36, o.asc + o.desc + 20);
+        g.stroke();
+      }
+    };
+    if (o.plain) shape(o.plain);
+    else {
+      g.save(); g.shadowColor = paint.glow;
+      for (const b of [b2, b1]) { g.shadowBlur = b * dpr; shape(paint.glow); }
+      g.restore();
+      shape("rgba(0,0,0,.85)", sy);
+      shape(fillStyleFor(g, paint, ox - (o.xi || 0), o.totalW || w, top, bottom));
+    }
+    return { c, bw, bh, cx: pad + w / 2, cy: pad + (o.asc + o.desc) / 2 };
+  }
+
+  // Picks a place on the whole screen that keeps away from the typing area, the banner and the other praise words.
+  const praises = [];
+  const boxOverlap = (a, b) => Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+  function pickPosition(bw, bh) {
+    const avoid = [];
+    const d = $("desk").getBoundingClientRect();
+    avoid.push({ l: d.left - 30, t: d.top - 30, r: d.right + 30, b: d.bottom + 30 });
+    if (bannerActive()) avoid.push({ l: W * .2, t: H * .32, r: W * .8, b: H * .68 });
+    for (const p of praises) if (!p.crumble && !p.fastExit) avoid.push({ l: p.box.l - 10, t: p.box.t - 10, r: p.box.r + 10, b: p.box.b + 10 });
+    const m = 16;
+    let best = null, bestOverlap = Infinity;
+    for (let i = 0; i < 16; i++) {
+      const x = m + bw / 2 + Math.random() * Math.max(0, W - 2 * m - bw);
+      const y = m + bh / 2 + Math.random() * Math.max(0, H - 2 * m - bh);
+      const box = { l: x - bw / 2, t: y - bh / 2, r: x + bw / 2, b: y + bh / 2 };
+      const ov = avoid.reduce((s, a) => s + boxOverlap(box, a), 0);
+      if (ov === 0) return { x, y, box };
+      if (ov < bestOverlap) { bestOverlap = ov; best = { x, y, box }; }
+    }
+    return best;
+  }
+
+  function spawnPraise(tier, forcedId) {
+    const word = nextFromBag(PRAISE_WORDS[tier], bags[tier], tier);
+    const style = pickStyle(forcedId);
+    const colorKind = pickColorKind(tier);
+    const paint = makePaint(colorKind, tier);
+    const k = Math.max(.5, Math.min(1.2, W / 1600));
+    let size = PRAISE_SIZE[tier] * k * (style.sizeScale || 1);
+    setFont(measure, style.font, size, style.stretch);
+    let w = measure.measureText(word).width;
+    if (w > W * .7) { size *= W * .7 / w; setFont(measure, style.font, size, style.stretch); w = measure.measureText(word).width; }
+    const m = measure.measureText(word);
+    const asc = (m.actualBoundingBoxAscent || size * .75) + size * .06, desc = (m.actualBoundingBoxDescent || size * .1) + size * .06;
+    const h = asc + desc;
+    const glow = [10 + 2 * tier, 24 + 6 * tier].map(v => v * Math.max(.6, k));
+    const tilt = (style.tiltBase || 0) + (Math.random() * 2 - 1) * (style.tilt ?? 8);
+    const rad = tilt * Math.PI / 180, cs = Math.abs(Math.cos(rad)), sn = Math.abs(Math.sin(rad));
+    const pos = pickPosition((w * cs + h * sn) * 1.15 + 20, (w * sn + h * cs) * 1.15 + 20);
+    const p = { word, style, tier, paint, colorKind, size, w, h, tilt, x: pos.x, y: pos.y, box: pos.box,
+      side: pos.x < W / 2 ? -1 : 1, born: performance.now(), dur: style.dur, fired: 0, gl: { next: 0 } };
+    if (style.letters) {
+      p.dur = Math.max(style.dur, 900 + word.length * 55);
+      p.letters = [...word].map((ch, i) => {
+        const xi = measure.measureText(word.slice(0, i)).width, adv = measure.measureText(ch).width;
+        const ang = Math.random() * Math.PI * 2, dist = 250 + Math.random() * 150, angE = Math.random() * Math.PI * 2, distE = 260 + Math.random() * 160;
+        return { ch, i, lx: xi + adv / 2 - w / 2,
+          sprite: ch.trim() ? makeSprite(ch, style, size, paint, { glow, asc, desc, xi, totalW: w }) : null,
+          dx0: Math.cos(ang) * dist, dy0: Math.sin(ang) * dist * .7, rot0: (Math.random() < .5 ? -1 : 1) * (90 + Math.random() * 180),
+          dxE: Math.cos(angE) * distE, dyE: Math.sin(angE) * distE, rotE: (Math.random() < .5 ? -1 : 1) * (180 + Math.random() * 180) };
+      });
+    } else {
+      p.sprite = makeSprite(word, style, size, paint, { glow, asc, desc });
+      if (style.glitch) {
+        p.cyan = makeSprite(word, style, size, paint, { asc, desc, plain: "#00f0ff" });
+        p.magenta = makeSprite(word, style, size, paint, { asc, desc, plain: "#ff2bd6" });
+      }
+    }
+    praises.push(p);
+    const alive = praises.filter(q => !q.crumble && !q.fastExit);
+    if (alive.length > MAX_PRAISES) alive[0].fastExit = performance.now();
+    $("lastPraise").innerHTML = `直前の褒め言葉：<b></b>（${RANKS[tier].name}）・${style.name}・${COLOR_NAMES[colorKind]}`;
+    $("lastPraise").querySelector("b").textContent = word;
+  }
+
+  const rings = [];
+  function firePraiseFx(p, kind) {
+    const t = p.tier, colorFn = particleColorFn(p.paint);
+    if (kind === "impact") {
+      rings.push({ x: p.x, y: p.y, r0: p.w * .3, r1: p.w * .9, born: performance.now(), color: p.paint.particle || "#ffffff" });
+      burst(p.x, p.y, PRAISE_IMPACT_BURST[t], { speed: 6 + t, size: 3 + t * .5, colorFn });
+      shakeAmt = Math.max(shakeAmt, PRAISE_SHAKE[t]);
+    } else {
+      burst(p.x, p.y, PRAISE_BURST[t], { speed: 5 + t * .8, size: 2.5 + t * .5, colorFn });
+    }
+  }
+
+  function drawSprite(sp, alpha) {
+    px.globalAlpha = Math.max(0, Math.min(1, alpha));
+    px.drawImage(sp.c, -sp.cx, -sp.cy, sp.bw, sp.bh);
+  }
+  function drawPraises(now, sx0, sy0) {
+    px.setTransform(dpr, 0, 0, dpr, 0, 0);
+    px.clearRect(0, 0, W, H);
+    // Shockwave rings of "ドンッ" and "ズドン".
+    px.globalCompositeOperation = "lighter";
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i], u = (now - r.born) / 450;
+      if (u >= 1) { rings.splice(i, 1); continue; }
+      px.globalAlpha = .8 * (1 - u); px.strokeStyle = r.color; px.lineWidth = 8 * (1 - u);
+      px.beginPath(); px.arc(r.x + sx0, r.y + sy0, r.r0 + (r.r1 - r.r0) * EASE.out(u), 0, Math.PI * 2); px.stroke();
+    }
+    px.globalCompositeOperation = "source-over";
+    for (let i = 0; i < praises.length; i++) {
+      if (!drawPraise(praises[i], now, sx0, sy0)) { praises.splice(i, 1); i--; }
+    }
+    px.globalAlpha = 1;
+    px.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  // Returns false when the word is gone.
+  function drawPraise(p, now, sx0, sy0) {
+    let T = now - p.born, fade = 1, fall = null;
+    if (p.crumble) {
+      // BREAK: frozen in place, then falls, tilts and fades in 600 ms.
+      const d = now - p.crumble.start, u = Math.min(1, d / 600);
+      if (u >= 1) return false;
+      T = p.crumble.T; fall = { y: .5 * 1667 * (d / 1000) ** 2, r: p.crumble.rv * u }; fade = 1 - EASE.in(u);
+    } else if (T >= p.dur) return false;
+    if (p.fastExit) { const d = now - p.fastExit; if (d >= 150) return false; fade *= 1 - d / 150; }
+    const t = Math.min(1, T / p.dur), st = p.style;
+    if (!p.crumble) while (p.fired < (st.fx || []).length && t >= st.fx[p.fired][0]) firePraiseFx(p, st.fx[p.fired++][1]);
+    const base = () => {
+      px.setTransform(dpr, 0, 0, dpr, 0, 0);
+      px.translate(p.x + sx0, p.y + sy0);
+      if (fall) { px.translate(0, fall.y); px.rotate(fall.r * Math.PI / 180); }
+      px.rotate(p.tilt * Math.PI / 180);
+    };
+    if (st.letters) { drawLetters(p, T, base, fade); return true; }
+    const side = st.side ? p.side : 1;
+    const ev = tt => ({ o: track(st.tr.o, tt, 1), s: track(st.tr.s, tt, 1), sx: track(st.tr.sx, tt, 1), sy: track(st.tr.sy, tt, 1),
+      r: track(st.tr.r, tt, 0), x: track(st.tr.x, tt, 0) * side, y: track(st.tr.y, tt, 0), k: track(st.tr.k, tt, 0) * side });
+    const place = v => {
+      base(); px.translate(v.x, v.y); px.rotate(v.r * Math.PI / 180);
+      if (v.k) px.transform(1, 0, Math.tan(v.k * Math.PI / 180), 1, 0, 0);
+      const pivotY = st.pivot === "bottom" ? p.h / 2 : 0;
+      px.translate(0, pivotY); px.scale(v.s * v.sx, v.s * v.sy); px.translate(0, -pivotY);
+    };
+    const v = ev(t);
+    const back = st.backDim && v.s * v.sx < 0 ? st.backDim : 1;
+    // "シュッ": afterimages, only while they are apart from the word.
+    if (st.ghosts && !p.crumble) for (const [lag, a] of st.ghosts) {
+      const g = ev(Math.max(0, (T - lag) / p.dur));
+      if (Math.abs(g.x - v.x) + Math.abs(g.k - v.k) * 4 < 3) continue;
+      place(g); drawSprite(p.sprite, g.o * a * fade);
+    }
+    // "バグッ": color split and sliced bands, re-rolled every 50 ms in the glitch windows.
+    const inGlitch = st.glitch && !p.crumble && st.glitch.some(([a, b]) => t >= a && t <= b);
+    if (inGlitch) {
+      if (now >= p.gl.next) {
+        p.gl = { next: now + 50, x: (Math.random() - .5) * 20, k: (Math.random() - .5) * 20, flick: .4 + Math.random() * .6, bands: [0, 1, 2].map(() => (Math.random() - .5) * 48) };
+      }
+      const d = t < .5 ? 2 + 12 * (1 - t / .28) : 2 + 12 * ((t - .8) / .2);
+      const gv = { ...v, x: v.x + p.gl.x, k: v.k + p.gl.k };
+      px.globalCompositeOperation = "lighter";
+      for (const [sp, dx] of [[p.cyan, -d], [p.magenta, d]]) { place({ ...gv, x: gv.x + dx }); drawSprite(sp, .8 * v.o * fade * p.gl.flick); }
+      px.globalCompositeOperation = "source-over";
+      place(gv);
+      const sp = p.sprite, cutsY = [0, .3, .7, 1].map(f => f * sp.bh);
+      px.globalAlpha = Math.max(0, Math.min(1, v.o * fade * p.gl.flick));
+      for (let b = 0; b < 3; b++) {
+        const y0 = cutsY[b], hh = cutsY[b + 1] - y0;
+        px.drawImage(sp.c, 0, y0 * dpr, sp.c.width, hh * dpr, -sp.cx + p.gl.bands[b], -sp.cy + y0, sp.bw, hh);
+      }
+      return true;
+    }
+    place(v); drawSprite(p.sprite, v.o * fade * back);
+    return true;
+  }
+  // "うねうね" and "ババババ": the same letters drawn one by one.
+  function drawLetters(p, T, base, fade) {
+    const n = p.letters.length, st = p.style;
+    if (st.letters === "scatter" && !p.exploded && T >= p.dur - 350 && !p.crumble) {
+      p.exploded = true;
+      for (const L of p.letters) if (L.sprite) burst(p.x + L.lx * Math.cos(p.tilt * Math.PI / 180), p.y + L.lx * Math.sin(p.tilt * Math.PI / 180), 4, { speed: 6, size: 3, colorFn: particleColorFn(p.paint) });
+    }
+    for (const L of p.letters) {
+      if (!L.sprite) continue;
+      const i = L.i;
+      let dx = 0, dy = 0, rot = 0, s = 1, o = 1;
+      if (st.letters === "wave") {
+        const a = Math.max(0, Math.min(1, (T - i * 35) / 220)), ea = EASE.back(a);
+        o = Math.min(1, a / .4); dy = 34 * (1 - ea); s = .6 + .4 * ea;
+        const amp = 9 * Math.max(0, Math.min(1, (T - i * 35 - 220) / 200));
+        dy += -amp * Math.sin(2 * Math.PI * T / 700 - i * .55);
+        const t0 = p.dur - 300 - (n - 1) * 20, e = Math.max(0, Math.min(1, (T - t0 - i * 20) / 300)), ee = EASE.in(e);
+        o *= 1 - ee; dy += 40 * ee;
+      } else {
+        const a = Math.max(0, Math.min(1, (T - i * 15) / 380)), ea = EASE.back(a);
+        dx = (1 - ea) * L.dx0; dy = (1 - ea) * L.dy0; rot = (1 - ea) * L.rot0; s = .4 + .6 * ea; o = Math.min(1, a / .4);
+        const e = Math.max(0, Math.min(1, (T - (p.dur - 350)) / 350)), ee = EASE.out(e);
+        dx += ee * L.dxE; dy += ee * L.dyE; rot += ee * L.rotE; s *= 1 + .3 * ee; o *= 1 - EASE.in(e);
+      }
+      base(); px.translate(L.lx + dx, dy); px.rotate(rot * Math.PI / 180); px.scale(s, s);
+      drawSprite(L.sprite, o * fade);
+    }
+  }
+  function crumblePraises() {
+    const now = performance.now();
+    for (const p of praises) {
+      if (p.crumble || p.fastExit) continue;
+      p.crumble = { start: now, T: Math.min(now - p.born, p.dur - 1), rv: (Math.random() < .5 ? -1 : 1) * (30 + Math.random() * 30) };
+      burst(p.x, p.y, 12, { color: "#ff2a3d", shard: true, speed: 8, size: 4 });
+    }
+  }
+
+  // ---------- milestone: 200, 300, ... ----------
+  function showMilestone(n) {
+    resetBanner();
+    const word = nextFromBag(MILESTONE_WORDS, milestoneBag, "milestone");
+    const h0 = hue;
+    bannerText.textContent = n + " COMBO!!";
+    bannerText.className = "milestone";
+    bannerText.style.textShadow = "none";
+    bannerText.style.color = "transparent";
+    bannerText.style.background = `linear-gradient(90deg, ${[0, 1, 2, 3, 4, 5, 6].map(k => `hsl(${(h0 + k * 50) % 360} 100% 62%)`).join(", ")})`;
+    bannerText.style.webkitBackgroundClip = "text"; bannerText.style.backgroundClip = "text";
+    bannerText.style.filter = `drop-shadow(0 0 18px #fff) drop-shadow(0 0 46px hsl(${h0} 100% 60%)) drop-shadow(0 6px 0 #000)`;
+    bannerSub.textContent = word;
+    bannerSub.style.textShadow = `0 0 18px hsl(${h0} 100% 60%), 0 0 40px hsl(${(h0 + 120) % 360} 100% 60%), 0 4px 0 #000`;
+    bannerAnim = bannerText.animate([{ opacity: 0, transform: "scale(.3)" }, { opacity: 1, transform: "scale(1.2)", offset: .15 }, { opacity: 1, transform: "scale(1)", offset: .25 }, { opacity: 1, transform: "scale(1)", offset: .78 }, { opacity: 0, transform: "scale(1.5)" }],
+      { duration: 1700, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" });
+    bannerSubAnim = bannerSub.animate([{ opacity: 0, transform: "scale(.6)" }, { opacity: 0, transform: "scale(.6)", offset: .2 }, { opacity: 1, transform: "scale(1.08)", offset: .3 }, { opacity: 1, transform: "scale(1)", offset: .36 }, { opacity: 1, transform: "scale(1)", offset: .78 }, { opacity: 0, transform: "scale(1.2)" }],
+      { duration: 1700, fill: "forwards" });
+    for (let k = 0; k < 12; k++) burst(Math.random() * W, Math.random() * H, 40, { speed: 9, size: 4, colorFn: () => `hsl(${Math.random() * 360} 100% 62%)` });
+    $("flashWhite").animate([{ opacity: .35 }, { opacity: 0 }], { duration: 500, easing: "ease-out" });
+    shakeAmt = Math.max(shakeAmt, 16);
+  }
 
   // ---------- state / UI ----------
   const rankEl = $("rank"), comboEl = $("combo"), badge = $("badge"), candWrap = $("candWrap"), ladder = $("ladder");
@@ -292,13 +722,21 @@ textarea {
     burst(o.x, o.y, r.burst, { speed: 4 + rankIdx * 1.6, size: 2.5 + rankIdx * .6 });
     if (rankIdx >= 3 && Math.random() < (rankIdx === 4 ? .5 : .2)) burst(Math.random() * W, Math.random() * H * .6, r.burst, { speed: 7, size: 3.5, lift: 2 });
     shakeAmt = Math.max(shakeAmt, r.shake);
-    if (rankIdx > prev) {
+    const rankUp = rankIdx > prev;
+    const praise = combo % 5 === 0;
+    const milestone = combo >= 200 && combo % 100 === 0;
+    if (rankUp) {
       paintRank();
       showBanner(r.name + " RANK!!", r.color === "rainbow" ? `hsl(${hue} 100% 62%)` : r.color, "up");
       for (let k = 0; k < 2 + rankIdx * 2; k++) burst(Math.random() * W, Math.random() * H, 30, { speed: 8, size: 4 });
       shakeAmt = r.shake * 2.2 + 4;
-      play("up");
-    } else play("key");
+    }
+    if (milestone) showMilestone(combo);
+    if (praise) spawnPraise(rankIdx);
+    if (milestone) playMilestone();
+    else if (rankUp) playRankUpPraise();
+    else if (praise) playPraise(0);
+    else play("key");
     render();
   }
   function breakCombo() {
@@ -308,6 +746,7 @@ textarea {
     burst(W / 2, H / 2, 80, { color: "#ff6a3d", shard: true, speed: 14, size: 6 });
     $("flash").animate([{ opacity: .75 }, { opacity: 0 }], { duration: 450, easing: "ease-out" });
     showBanner("BREAK", "#ff2a3d", "break");
+    crumblePraises();
     shakeAmt = 14;
     play("brk");
     combo = 0; rankIdx = 0; paintRank(); render();
@@ -325,24 +764,30 @@ textarea {
   const IGNORE = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab", "Escape"]);
   input.addEventListener("keydown", e => {
     ensureAudio();
+    if (e.repeat) return;
     if (e.key === "Backspace") { breakCombo(); return; }
     if (IGNORE.has(e.key)) return;
     hit();
   });
   input.addEventListener("input", renderCands);
 
+  // test one praise word with the current rank
+  $("praiseTest").addEventListener("click", () => { ensureAudio(); spawnPraise(rankIdx, praiseSel.value); playPraise(0); });
+
   // demo
   let demoTimer = null;
+  const demoLabel = "自動デモ（200コンボまで）";
   $("demo").addEventListener("click", () => {
     ensureAudio();
-    if (demoTimer) { clearTimeout(demoTimer); demoTimer = null; $("demo").textContent = "自動デモ（SSSまで）"; return; }
+    if (demoTimer) { clearTimeout(demoTimer); demoTimer = null; $("demo").textContent = demoLabel; return; }
     $("demo").textContent = "デモ停止";
     const text = "どぱがきIMEかんせいしたやっぱりこれからのじだいはIMEでもどーぱみんだしていかないとね";
     let i = 0;
     const step = () => {
-      if (combo >= 112) { breakCombo(); demoTimer = null; $("demo").textContent = "自動デモ（SSSまで）"; return; }
+      if (combo >= 206) { breakCombo(); demoTimer = null; $("demo").textContent = demoLabel; return; }
+      if (input.value.length > 400) input.value = "";
       input.value += text[i++ % text.length]; renderCands(); hit();
-      demoTimer = setTimeout(step, 55 + Math.random() * 60);
+      demoTimer = setTimeout(step, 45 + Math.random() * 45);
     };
     step();
   });
@@ -350,5 +795,6 @@ textarea {
 
   // realistic resting state: start mid-run at A rank
   combo = 14; rankIdx = rankOf(combo); input.value = "ドパガキIMEつくってる"; paintRank(); comboEl.textContent = combo; badge.textContent = "x" + combo; renderCands();
+  requestAnimationFrame(tick);
 })();
 </script>

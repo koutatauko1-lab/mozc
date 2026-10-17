@@ -456,6 +456,14 @@ optional DopagakiConfig dopagaki_config = 7000;
 
 ---
 
+## 9. アップデート
+
+フェーズ0〜7 のあとに足す機能。それぞれ別の指示書（仕様書）があるので、作業の前に最後まで読むこと。進捗はこの文書の末尾の「進捗ノート」に続けて書く。
+
+- アップデート1「褒め言葉」：`docs/dopagaki/update1_praise.md`（コンボが5の倍数になるたびに英語の褒め言葉、200コンボごとに特大版。数値と動きの正解は新しい `docs/dopagaki/preview.html`）
+
+---
+
 ## 付録A：`windows.yaml` の案（フェーズ0）
 
 既存ファイルの `actions/checkout`・`actions/cache`・`actions/upload-artifact` のバージョン（コミットハッシュ指定）をそのまま使うこと。下はたたき台で、細部は実際に動かして調整してよい。
@@ -645,3 +653,7 @@ jobs:
   - スリープ（19:16:43〜19:17:01）のあと、mozc_renderer と mozc_server は新しいプロセスで立ち上がり直していた（19:17:34）。アプリのエラーの記録（Windows のイベントログ）は無く、こーたも復帰後に普通に打てている。もとの Mozc の動きと思われる。
   - イヤホンの抜き差し（`kStalledSoundMs`）は、こーたが試したかどうか未確認。
   - 記録のスクリプト（`monitor.ps1`・`cpu_sampler.ps1`・`dbwin_listen2.ps1`）は、Claude Code のバックグラウンドで動かすとスリープで止まる。長い記録は `Start-Process powershell -WindowStyle Hidden` で別に動かすと止まらない。
+
+### アップデート1「褒め言葉」
+
+- 2026-10-17：**第0章**。こーたから指示書 `docs/dopagaki/update1_praise.md` と新しい `docs/dopagaki/preview.html`（上書き。354行→800行）を受け取って置いた。この文書に第9章「アップデート」を足した。次は UK3（同時に出る数）をこーたに確認してから、フェーズU1。
