@@ -184,7 +184,10 @@ TEST_F(DopagakiStateTest, MilestoneFromTwoHundred) {
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 200, 0, 200), now_),
               ElementsAre(Keys(1, DopagakiRank::kSSS), Milestone(200),
                           Praise(200, DopagakiRank::kSSS)));
-  TypeKeys(state, kSession1, 299);
+  for (uint64_t i = 201; i <= 299; ++i) {
+    state.OnEvent(MakeEvent(kSession1, i, 0, i), now_);
+  }
+  EXPECT_EQ(state.combo(), 299);
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 300, 0, 300), now_),
               ElementsAre(Keys(1, DopagakiRank::kSSS), Milestone(300),
                           Praise(300, DopagakiRank::kSSS)));

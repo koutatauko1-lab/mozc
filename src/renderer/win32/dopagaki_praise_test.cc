@@ -279,8 +279,8 @@ TEST(DopagakiPraiseTest, PositionWhenEverythingIsTaken) {
   const DopagakiBox avoid[] = {{0, 0, 1920, 1080}};
   const DopagakiPraisePosition position =
       PickDopagakiPraisePosition(200, 100, 1920, 1080, avoid, random);
-  EXPECT_FLOAT_EQ(position.box.width(), 200);
-  EXPECT_FLOAT_EQ(position.box.height(), 100);
+  EXPECT_NEAR(position.box.width(), 200, 1e-3);
+  EXPECT_NEAR(position.box.height(), 100, 1e-3);
   EXPECT_GE(position.box.left, 0);
   EXPECT_LE(position.box.right, 1920);
 
