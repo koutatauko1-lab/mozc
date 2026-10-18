@@ -15,14 +15,19 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iterator>
 #include <random>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "renderer/win32/dopagaki_effects.h"
+#include "renderer/win32/dopagaki_praise.h"
+#include "renderer/win32/dopagaki_state.h"
 
 namespace mozc {
 namespace renderer {
@@ -44,6 +49,12 @@ constexpr float kBannerShadowY = 6;
 constexpr float kComboLabelGlow = 10;
 constexpr float kComboLabelShadowY = 2;
 constexpr float kComboLabelFontSize = 22;
+// Update 1 (1.5).
+constexpr float kPraiseShadowY = 4;
+constexpr float kPraiseShadowOpacity = 0.85f;
+constexpr float kPraiseMaxWidthRatio = 0.7f;
+// The size of the layout box used to measure a word.
+constexpr float kPraiseLayoutSize = 10000;
 
 void Log(const wchar_t* message, HRESULT hr) {
   wchar_t buffer[160] = {};
@@ -391,6 +402,7 @@ bool DopagakiOverlay::EnsureDevice() {
 }
 
 void DopagakiOverlay::ReleaseDevice() {
+  praise_sprites_.clear();
   banner_cache_id_ = 0;
   banner_text_ = {};
   combo_label_cache_id_ = 0;
@@ -463,6 +475,8 @@ void DopagakiOverlay::Hide() {
     ::ShowWindow(window_, SW_HIDE);
   }
   visible_ = false;
+  // Nothing is drawn while hidden. The images of the words are not needed.
+  praise_sprites_.clear();
 }
 
 bool DopagakiOverlay::DrawFrame() {
@@ -473,6 +487,7 @@ bool DopagakiOverlay::DrawFrame() {
   UpdateBannerCache();
   UpdateComboLabelCache();
   UpdateBadgeCache();
+  UpdatePraiseCache();
 
   context_->SetTarget(target_bitmap_.get());
   context_->BeginDraw();
@@ -524,6 +539,9 @@ bool DopagakiOverlay::DrawFrame() {
                          GetDopagakiComboLabelOpacity(label->age_ms),
                          D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
   }
+
+  // Update 1: the praise words.
+  DrawPraises();
 
   // The red flash of BREAK.
   const float flash = effects_.flash_opacity();
@@ -964,6 +982,227 @@ bool DopagakiOverlay::CreateGlowText(const std::wstring& text,
   }
   *glow_text = std::move(result);
   return true;
+}
+
+bool DopagakiOverlay::AddPraise(DopagakiRank tier,
+                                std::span<const DopagakiBox> avoid) {
+  if (!IsHealthy() || !dwrite_factory_) {
+    return false;
+  }
+  // Phase U1 uses only "pop" with the rank color. The 12 styles and the 5
+  // colors come in phase U2.
+  DopagakiPraiseChoice choice = effects_.ChoosePraise(
+      tier, DopagakiPraiseStyle::kPop, DopagakiPraiseColor::kRank);
+  PraiseText text;
+  if (!MeasurePraise(choice, &text)) {
+    return false;
+  }
+  // 1.5: not wider than 70% of the monitor.
+  const float max_width = effects_.width() * kPraiseMaxWidthRatio;
+  if (text.width > max_width) {
+    choice.font_size *= max_width / text.width;
+    if (!MeasurePraise(choice, &text)) {
+      return false;
+    }
+  }
+  PraiseSprite sprite;
+  if (!CreatePraiseSprite(choice, text, &sprite)) {
+    return false;
+  }
+  sprite.id = effects_.AddPraise(choice, text.width, text.height, avoid);
+  praise_sprites_.push_back(std::move(sprite));
+  return true;
+}
+
+bool DopagakiOverlay::MeasurePraise(const DopagakiPraiseChoice& choice,
+                                    PraiseText* text) {
+  if (choice.font_size <= 0 || choice.word.empty()) {
+    return false;
+  }
+  const DopagakiPraiseFont& font =
+      GetDopagakiPraiseStyleInfo(choice.style).font;
+  const wchar_t* family = L"Segoe UI";
+  for (const wchar_t* candidate : font.families) {
+    if (candidate != nullptr &&
+        HasFontFamily(dwrite_factory_.get(), candidate)) {
+      family = candidate;
+      break;
+    }
+  }
+  wil::com_ptr_nothrow<IDWriteTextFormat> format;
+  if (FAILED(dwrite_factory_->CreateTextFormat(
+          family, nullptr, static_cast<DWRITE_FONT_WEIGHT>(font.weight),
+          font.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+          font.condensed ? DWRITE_FONT_STRETCH_CONDENSED
+                         : DWRITE_FONT_STRETCH_NORMAL,
+          choice.font_size, L"en-us", format.put()))) {
+    return false;
+  }
+  wil::com_ptr_nothrow<IDWriteTextLayout> layout;
+  if (FAILED(dwrite_factory_->CreateTextLayout(
+          choice.word.c_str(), static_cast<UINT32>(choice.word.size()),
+          format.get(), kPraiseLayoutSize, kPraiseLayoutSize,
+          layout.put()))) {
+    return false;
+  }
+  DWRITE_TEXT_METRICS metrics = {};
+  DWRITE_OVERHANG_METRICS overhang = {};
+  if (FAILED(layout->GetMetrics(&metrics)) ||
+      FAILED(layout->GetOverhangMetrics(&overhang))) {
+    return false;
+  }
+  // The ink, like actualBoundingBoxAscent/Descent of the preview. The
+  // overhangs are relative to the layout box. Falls back to the line box if
+  // they look wrong.
+  float top = -overhang.top;
+  float bottom = kPraiseLayoutSize + overhang.bottom;
+  if (!(bottom > top) || top < -choice.font_size ||
+      bottom > metrics.height + choice.font_size) {
+    top = 0;
+    bottom = metrics.height;
+  }
+  const float margin = choice.font_size * 0.06f;
+  top -= margin;
+  bottom += margin;
+  text->layout = std::move(layout);
+  text->width = std::max(1.0f, metrics.width);
+  text->height = bottom - top;
+  text->center_x = metrics.left + metrics.width / 2;
+  text->center_y = (top + bottom) / 2;
+  return true;
+}
+
+// makeSprite() in preview.html: the glows in the glow color, the black
+// shadow and the word.
+bool DopagakiOverlay::CreatePraiseSprite(const DopagakiPraiseChoice& choice,
+                                         const PraiseText& text,
+                                         PraiseSprite* sprite) {
+  DWRITE_TEXT_METRICS metrics = {};
+  if (!text.layout || FAILED(text.layout->GetMetrics(&metrics))) {
+    return false;
+  }
+  const std::array<float, 2> glow =
+      GetDopagakiPraiseGlowRadii(choice.tier, effects_.width());
+  const float padding =
+      std::ceil(std::max(glow[0], glow[1]) * 1.5f + kPraiseShadowY + 6);
+  PraiseSprite result;
+  result.bitmap_width = metrics.widthIncludingTrailingWhitespace + padding * 2;
+  result.bitmap_height = metrics.height + padding * 2;
+  const D2D1_POINT_2F origin =
+      D2D1::Point2F(padding - metrics.left, padding);
+  result.anchor_x = origin.x + text.center_x;
+  result.anchor_y = origin.y + text.center_y;
+
+  const float scale = static_cast<float>(dpi_) / 96.0f;
+  const D2D1_SIZE_U pixel_size = D2D1::SizeU(
+      static_cast<UINT32>(std::ceil(result.bitmap_width * scale)),
+      static_cast<UINT32>(std::ceil(result.bitmap_height * scale)));
+  const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+      D2D1_BITMAP_OPTIONS_TARGET,
+      D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                        D2D1_ALPHA_MODE_PREMULTIPLIED),
+      static_cast<float>(dpi_), static_cast<float>(dpi_));
+  wil::com_ptr_nothrow<ID2D1Bitmap1> glow_source;
+  if (FAILED(context_->CreateBitmap(pixel_size, nullptr, 0, &properties,
+                                    glow_source.put())) ||
+      FAILED(context_->CreateBitmap(pixel_size, nullptr, 0, &properties,
+                                    result.bitmap.put()))) {
+    return false;
+  }
+
+  // The word in the glow color, used as the source of the glows.
+  context_->SetTarget(glow_source.get());
+  context_->BeginDraw();
+  context_->SetTransform(D2D1::Matrix3x2F::Identity());
+  context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+  brush_->SetColor(ToD2DColor(choice.glow, 1));
+  context_->DrawTextLayout(origin, text.layout.get(), brush_.get());
+  HRESULT hr = context_->EndDraw();
+
+  if (SUCCEEDED(hr)) {
+    context_->SetTarget(result.bitmap.get());
+    context_->BeginDraw();
+    context_->SetTransform(D2D1::Matrix3x2F::Identity());
+    context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+    for (const float blur : {glow[1], glow[0]}) {
+      wil::com_ptr_nothrow<ID2D1Effect> effect;
+      if (SUCCEEDED(
+              context_->CreateEffect(CLSID_D2D1GaussianBlur, effect.put()))) {
+        effect->SetInput(0, glow_source.get());
+        effect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, blur / 2);
+        context_->DrawImage(effect.get());
+      }
+    }
+    brush_->SetColor(D2D1::ColorF(0, 0, 0, kPraiseShadowOpacity));
+    context_->DrawTextLayout(D2D1::Point2F(origin.x, origin.y + kPraiseShadowY),
+                             text.layout.get(), brush_.get());
+    // Gold and rainbow gradients come in phase U2. Until then, |fill|.
+    brush_->SetColor(ToD2DColor(choice.fill, 1));
+    context_->DrawTextLayout(origin, text.layout.get(), brush_.get());
+    hr = context_->EndDraw();
+  }
+  context_->SetTarget(target_bitmap_.get());
+  if (FAILED(hr)) {
+    Log(L"praise drawing failed", hr);
+    return false;
+  }
+  *sprite = std::move(result);
+  return true;
+}
+
+void DopagakiOverlay::UpdatePraiseCache() {
+  const std::vector<DopagakiPraise>& praises = effects_.praises();
+  std::erase_if(praise_sprites_, [&praises](const PraiseSprite& sprite) {
+    return std::none_of(praises.begin(), praises.end(),
+                        [&sprite](const DopagakiPraise& praise) {
+                          return praise.id == sprite.id;
+                        });
+  });
+}
+
+// drawPraise() in preview.html (1.3.4).
+void DopagakiOverlay::DrawPraises() {
+  for (const DopagakiPraise& praise : effects_.praises()) {
+    const auto sprite = std::find_if(
+        praise_sprites_.begin(), praise_sprites_.end(),
+        [&praise](const PraiseSprite& s) { return s.id == praise.id; });
+    if (sprite == praise_sprites_.end() || !sprite->bitmap) {
+      continue;
+    }
+    const DopagakiPraiseStyleInfo& info =
+        GetDopagakiPraiseStyleInfo(praise.choice.style);
+    const DopagakiPraiseView view = GetDopagakiPraiseView(praise);
+    const DopagakiPraiseFrame frame =
+        GetDopagakiPraiseFrame(praise.choice.style, view.t, praise.side);
+    float opacity = frame.opacity * view.opacity;
+    if (frame.scale_x < 0) {
+      opacity *= info.back_opacity;
+    }
+    opacity = std::clamp(opacity, 0.0f, 1.0f);
+    // A zero scale cannot be drawn (and there is nothing to see).
+    if (opacity <= 0 || std::abs(frame.scale_x) < 1e-3f ||
+        std::abs(frame.scale_y) < 1e-3f) {
+      continue;
+    }
+    const float pivot_y = info.bottom_pivot ? praise.height / 2 : 0;
+    context_->SetTransform(
+        D2D1::Matrix3x2F::Scale(frame.scale_x, frame.scale_y,
+                                D2D1::Point2F(0, pivot_y)) *
+        D2D1::Matrix3x2F::Skew(frame.skew_x, 0) *
+        D2D1::Matrix3x2F::Rotation(frame.rotation) *
+        D2D1::Matrix3x2F::Translation(frame.offset_x, frame.offset_y) *
+        D2D1::Matrix3x2F::Rotation(praise.tilt) *
+        D2D1::Matrix3x2F::Rotation(view.fall_rotation) *
+        D2D1::Matrix3x2F::Translation(0, view.fall_y) *
+        D2D1::Matrix3x2F::Translation(praise.x + effects_.shake_x(),
+                                      praise.y + effects_.shake_y()));
+    const D2D1_RECT_F rect = D2D1::RectF(
+        -sprite->anchor_x, -sprite->anchor_y,
+        -sprite->anchor_x + sprite->bitmap_width,
+        -sprite->anchor_y + sprite->bitmap_height);
+    context_->DrawBitmap(sprite->bitmap.get(), &rect, opacity,
+                         D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+  }
 }
 
 LRESULT CALLBACK DopagakiOverlay::WindowProc(HWND window, UINT message,

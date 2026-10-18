@@ -105,6 +105,7 @@ void DopagakiState::AddKeys(uint64_t keys,
   if (keys == 0) {
     return;
   }
+  const uint64_t before_combo = combo_;
   const DopagakiRank before = rank();
   combo_ += keys;
   const DopagakiRank after = rank();
@@ -112,6 +113,17 @@ void DopagakiState::AddKeys(uint64_t keys,
   if (after > before) {
     // Only the highest rank even if several ranks are passed at once.
     actions->push_back({DopagakiAction::Type::kRankUp, combo_, after});
+  }
+  // Update 1: also only the highest multiple passed.
+  const uint64_t hundreds = combo_ / 100 * 100;
+  if (combo_ / 100 > before_combo / 100 && hundreds >= 200) {
+    actions->push_back(
+        {DopagakiAction::Type::kMilestone, hundreds, DopagakiRank::kSSS});
+  }
+  if (combo_ / 5 > before_combo / 5) {
+    const uint64_t fives = combo_ / 5 * 5;
+    actions->push_back(
+        {DopagakiAction::Type::kPraise, fives, GetDopagakiRank(fives)});
   }
 }
 

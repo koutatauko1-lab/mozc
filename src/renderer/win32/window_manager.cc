@@ -55,6 +55,7 @@
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/dopagaki_effects.h"
 #include "renderer/win32/dopagaki_overlay.h"
+#include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
 #include "renderer/win32/infolist_window.h"
@@ -528,6 +529,14 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
     label_position = GetDopagakiComboLabelPosition(target_window);
     origin = D2D1::Point2F(label_position->x + 40, label_position->y + 12);
   }
+  // Update 1: praise words keep away from these (1.6).
+  std::vector<DopagakiBox> praise_avoid;
+  if (std::any_of(actions.begin(), actions.end(),
+                  [](const DopagakiAction& action) {
+                    return action.type == DopagakiAction::Type::kPraise;
+                  })) {
+    praise_avoid = GetDopagakiPraiseAvoidBoxes(target_window, candidate_rect);
+  }
 
   for (const DopagakiAction& action : actions) {
     switch (action.type) {
@@ -546,6 +555,14 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
           effects.OnBreak(origin.x, origin.y);
         }
         break;
+      case DopagakiAction::Type::kMilestone:
+        // Update 1: the big banner of 200, 300, ... comes in phase U3.
+        break;
+      case DopagakiAction::Type::kPraise:
+        // Update 1. After kRankUp, so that the new banner is kept free. If
+        // it fails, only this word is not shown.
+        dopagaki_overlay_->AddPraise(action.rank, praise_avoid);
+        break;
     }
   }
   const DopagakiRank rank = dopagaki_state_->rank();
@@ -563,6 +580,34 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
     effects.HideComboLabel();
   }
   dopagaki_overlay_->StartAnimation();
+}
+
+std::vector<DopagakiBox> WindowManager::GetDopagakiPraiseAvoidBoxes(
+    HWND target_window,
+    const std::optional<DopagakiRect>& candidate_rect) const {
+  std::vector<DopagakiBox> boxes;
+  if (candidate_rect.has_value()) {
+    boxes.push_back(DopagakiBox{candidate_rect->left, candidate_rect->top,
+                                candidate_rect->right, candidate_rect->bottom}
+                        .Inflated(30));
+  }
+  RECT caret = {};
+  if (GetDopagakiCaretRect(target_window, &caret)) {
+    const D2D1_POINT_2F top_left =
+        dopagaki_overlay_->ScreenToOverlay({caret.left, caret.top});
+    const D2D1_POINT_2F bottom_right =
+        dopagaki_overlay_->ScreenToOverlay({caret.right, caret.bottom});
+    boxes.push_back(
+        DopagakiBox{top_left.x, top_left.y, bottom_right.x, bottom_right.y}
+            .Inflated(60));
+  } else {
+    // Where "29 COMBO A" is shown.
+    const D2D1_POINT_2F label = GetDopagakiComboLabelPosition(target_window);
+    boxes.push_back(
+        DopagakiBox{label.x, label.y, label.x + 200, label.y + 50}.Inflated(
+            30));
+  }
+  return boxes;
 }
 
 void WindowManager::ApplyDopagakiSettings(

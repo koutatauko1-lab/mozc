@@ -40,6 +40,12 @@ DopagakiAction Break(uint64_t combo) { return {Type::kBreak, combo}; }
 DopagakiAction RankUp(uint64_t combo, DopagakiRank rank) {
   return {Type::kRankUp, combo, rank};
 }
+DopagakiAction Praise(uint64_t combo, DopagakiRank rank = DopagakiRank::kB) {
+  return {Type::kPraise, combo, rank};
+}
+DopagakiAction Milestone(uint64_t combo) {
+  return {Type::kMilestone, combo, DopagakiRank::kSSS};
+}
 
 class DopagakiStateTest : public ::testing::Test {
  protected:
@@ -120,7 +126,8 @@ TEST_F(DopagakiStateTest, RankUp) {
   TypeKeys(state, kSession1, 9);
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 10, 0, 10), now_),
               ElementsAre(Keys(1, DopagakiRank::kA),
-                          RankUp(10, DopagakiRank::kA)));
+                          RankUp(10, DopagakiRank::kA),
+                          Praise(10, DopagakiRank::kA)));
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 11, 0, 11), now_),
               ElementsAre(Keys(1, DopagakiRank::kA)));
 }
@@ -130,7 +137,74 @@ TEST_F(DopagakiStateTest, RankUpSkipsToTheHighestRank) {
   TypeKeys(state, kSession1, 9);
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 120, 0, 120), now_),
               ElementsAre(Keys(111, DopagakiRank::kSSS),
-                          RankUp(120, DopagakiRank::kSSS)));
+                          RankUp(120, DopagakiRank::kSSS),
+                          Praise(120, DopagakiRank::kSSS)));
+}
+
+TEST_F(DopagakiStateTest, PraiseEveryFive) {
+  DopagakiState state;
+  for (uint64_t i = 1; i <= 4; ++i) {
+    EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, i, 0, i), now_),
+                ElementsAre(Keys(1)));
+  }
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 5, 0, 5), now_),
+              ElementsAre(Keys(1), Praise(5)));
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 6, 0, 6), now_),
+              ElementsAre(Keys(1)));
+}
+
+TEST_F(DopagakiStateTest, OnlyOnePraiseForMergedKeystrokes) {
+  DopagakiState state;
+  TypeKeys(state, kSession1, 3);
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 12, 0, 12), now_),
+              ElementsAre(Keys(9, DopagakiRank::kA),
+                          RankUp(12, DopagakiRank::kA),
+                          Praise(10, DopagakiRank::kA)));
+
+  DopagakiState state2;
+  TypeKeys(state2, kSession1, 3);
+  EXPECT_THAT(state2.OnEvent(MakeEvent(kSession1, 17, 0, 17), now_),
+              ElementsAre(Keys(14, DopagakiRank::kA),
+                          RankUp(17, DopagakiRank::kA),
+                          Praise(15, DopagakiRank::kA)));
+}
+
+TEST_F(DopagakiStateTest, NoMilestoneAtHundred) {
+  DopagakiState state;
+  TypeKeys(state, kSession1, 99);
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 100, 0, 100), now_),
+              ElementsAre(Keys(1, DopagakiRank::kSSS),
+                          RankUp(100, DopagakiRank::kSSS),
+                          Praise(100, DopagakiRank::kSSS)));
+}
+
+TEST_F(DopagakiStateTest, MilestoneFromTwoHundred) {
+  DopagakiState state;
+  TypeKeys(state, kSession1, 199);
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 200, 0, 200), now_),
+              ElementsAre(Keys(1, DopagakiRank::kSSS), Milestone(200),
+                          Praise(200, DopagakiRank::kSSS)));
+  TypeKeys(state, kSession1, 299);
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 300, 0, 300), now_),
+              ElementsAre(Keys(1, DopagakiRank::kSSS), Milestone(300),
+                          Praise(300, DopagakiRank::kSSS)));
+}
+
+TEST_F(DopagakiStateTest, PraiseAfterBreak) {
+  DopagakiState state;
+  TypeKeys(state, kSession1, 7);
+  state.OnEvent(MakeEvent(kSession1, 7, 1, 0), now_);
+  for (uint64_t i = 1; i <= 4; ++i) {
+    state.OnEvent(MakeEvent(kSession1, 7 + i, 1, i), now_);
+  }
+  EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 12, 1, 5), now_),
+              ElementsAre(Keys(1), Praise(5)));
+
+  // A break and 5 keystrokes merged into one event.
+  DopagakiState state2;
+  TypeKeys(state2, kSession1, 7);
+  EXPECT_THAT(state2.OnEvent(MakeEvent(kSession1, 12, 1, 5), now_),
+              ElementsAre(Break(7), Keys(5), Praise(5)));
 }
 
 TEST_F(DopagakiStateTest, ComboIsSharedBySessions) {
@@ -147,7 +221,7 @@ TEST_F(DopagakiStateTest, UnknownSessionIsLimited) {
   DopagakiState state;
   // e.g. the renderer was restarted while the TIP was counting.
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 100, 3, 40), now_),
-              ElementsAre(Keys(5)));
+              ElementsAre(Keys(5), Praise(5)));
   EXPECT_EQ(state.combo(), 5);
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 101, 3, 41), now_),
               ElementsAre(Keys(1)));
@@ -167,7 +241,7 @@ TEST_F(DopagakiStateTest, OldSessionsAreForgotten) {
   const absl::Time later = now_ + absl::Minutes(11);
   // Treated as an unknown session again.
   EXPECT_THAT(state.OnEvent(MakeEvent(kSession1, 50, 0, 50), later),
-              ElementsAre(Keys(5)));
+              ElementsAre(Keys(5), Praise(5)));
   EXPECT_EQ(state.combo(), 8);
 }
 

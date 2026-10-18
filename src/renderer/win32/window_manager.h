@@ -35,12 +35,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "base/coordinates.h"
 #include "client/client_interface.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/win32/candidate_window.h"
 #include "renderer/win32/dopagaki_overlay.h"
+#include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_sound_synth.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "renderer/win32/indicator_window.h"
@@ -84,6 +86,11 @@ class WindowManager {
                             DopagakiSoundKind kind);
   // Dopagaki: applies the settings chosen from the menu (phase 6).
   void ApplyDopagakiSettings(const config::Config::DopagakiConfig& settings);
+  // Dopagaki update 1: the candidate window and the typing area in DIPs on
+  // the overlay, which praise words keep away from (1.6).
+  std::vector<DopagakiBox> GetDopagakiPraiseAvoidBoxes(
+      HWND target_window,
+      const std::optional<DopagakiRect>& candidate_rect) const;
 
   std::unique_ptr<DopagakiState> dopagaki_state_;
   std::unique_ptr<DopagakiOverlay> dopagaki_overlay_;

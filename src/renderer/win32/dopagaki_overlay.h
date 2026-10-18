@@ -14,10 +14,14 @@
 
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "renderer/win32/dopagaki_effects.h"
+#include "renderer/win32/dopagaki_praise.h"
+#include "renderer/win32/dopagaki_state.h"
 
 namespace mozc {
 namespace renderer {
@@ -64,6 +68,11 @@ class DopagakiOverlay {
   // the owner can put back what it moved.
   void Stop();
   void Destroy();
+  // Update 1: chooses, measures and adds a praise word of |tier|. |avoid| are
+  // the typing area and the candidate window in DIPs on the overlay (1.6).
+  // Must be called after Prepare(). Returns false if it failed; then only
+  // this word is not shown.
+  bool AddPraise(DopagakiRank tier, std::span<const DopagakiBox> avoid);
 
  private:
   struct GlowText {
@@ -73,6 +82,24 @@ class DopagakiOverlay {
     float text_height = 0;
     float bitmap_width = 0;
     float bitmap_height = 0;
+  };
+  // Update 1: a praise word measured with its font.
+  struct PraiseText {
+    wil::com_ptr_nothrow<IDWriteTextLayout> layout;
+    float width = 0;   // The advance width.
+    float height = 0;  // The ink with 6% of the font size above and below.
+    // The center of the box above in the coordinates of the layout.
+    float center_x = 0;
+    float center_y = 0;
+  };
+  // Update 1: the image of a praise word, centered at (anchor_x, anchor_y).
+  struct PraiseSprite {
+    uint64_t id = 0;
+    wil::com_ptr_nothrow<ID2D1Bitmap1> bitmap;
+    float bitmap_width = 0;
+    float bitmap_height = 0;
+    float anchor_x = 0;
+    float anchor_y = 0;
   };
 
   static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
@@ -106,6 +133,13 @@ class DopagakiOverlay {
   bool CreateGlowText(const std::wstring& text, IDWriteTextFormat* format,
                       const D2D1_COLOR_F& color, float blur1, float blur2,
                       float shadow_y, GlowText* glow_text);
+  // Update 1.
+  bool MeasurePraise(const DopagakiPraiseChoice& choice, PraiseText* text);
+  bool CreatePraiseSprite(const DopagakiPraiseChoice& choice,
+                          const PraiseText& text, PraiseSprite* sprite);
+  // Drops the images of the words that are gone.
+  void UpdatePraiseCache();
+  void DrawPraises();
   int width_pixels() const { return monitor_rect_.right - monitor_rect_.left; }
   int height_pixels() const {
     return monitor_rect_.bottom - monitor_rect_.top;
@@ -141,6 +175,7 @@ class DopagakiOverlay {
   GlowText combo_label_text_;
   uint64_t badge_cache_id_ = 0;
   GlowText badge_text_;
+  std::vector<PraiseSprite> praise_sprites_;
   std::function<void()> frame_callback_;
 };
 

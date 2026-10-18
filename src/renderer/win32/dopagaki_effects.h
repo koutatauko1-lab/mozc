@@ -8,9 +8,11 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
+#include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_state.h"
 
 namespace mozc {
@@ -36,9 +38,7 @@ DopagakiColor DopagakiColorFromRgb(uint32_t rgb);
 // [0, 1].
 DopagakiColor DopagakiColorFromHsl(double hue, double saturation,
                                    double lightness);
-// cubic-bezier() of CSS evaluated at |t| in [0, 1].
-double DopagakiCubicBezier(double x1, double y1, double x2, double y2,
-                           double t);
+// DopagakiCubicBezier() is in dopagaki_praise.h.
 
 struct DopagakiParticle {
   float x = 0;
@@ -125,6 +125,59 @@ DopagakiEdgeStyle GetDopagakiEdgeStyle(DopagakiRank rank);
 // The glow of SS and SSS pulses. 1 for the other ranks.
 float GetDopagakiEdgePulse(DopagakiRank rank, double edge_time);
 
+// Update 1: what a new praise word looks like (ChoosePraise).
+struct DopagakiPraiseChoice {
+  std::wstring word;
+  DopagakiPraiseStyle style = DopagakiPraiseStyle::kPop;
+  DopagakiPraiseColor color = DopagakiPraiseColor::kRank;
+  DopagakiRank tier = DopagakiRank::kB;
+  // Already multiplied by the size_scale of the style.
+  float font_size = 0;
+  // 1.4. |fill| is the main color of gold, and the first color of rainbow.
+  DopagakiColor fill;
+  DopagakiColor glow;
+  // nullopt for rainbow: each particle has a random hue from |hue|.
+  std::optional<DopagakiColor> particle;
+  // The hue when the word appeared (SSS colors and rainbow).
+  double hue = 0;
+};
+
+// Update 1: a praise word on the screen.
+struct DopagakiPraise {
+  DopagakiPraiseChoice choice;
+  // The size of the word measured with its font.
+  float width = 0;
+  float height = 0;
+  float tilt = 0;  // Degrees.
+  // The center, and the box kept away from the other words.
+  float x = 0;
+  float y = 0;
+  DopagakiBox box;
+  int side = 1;  // +1 on the right half of the screen, -1 on the left half.
+  double elapsed_ms = 0;
+  double duration_ms = 0;
+  uint64_t id = 0;  // Different for each word. Used for the text cache.
+  bool effect_fired = false;
+  // BREAK (1.9): frozen at |frozen_ms|, falls and fades in 600 ms.
+  bool crumbling = false;
+  double crumble_ms = 0;
+  double frozen_ms = 0;
+  float crumble_rotation = 0;  // Degrees at the end.
+  // A newer word pushed this one out (1.8): fades in 150 ms.
+  bool exiting = false;
+  double exit_ms = 0;
+};
+
+// How to draw a praise word at the current moment.
+struct DopagakiPraiseView {
+  double t = 0;           // Fraction of the duration (frozen while crumbling).
+  double elapsed_ms = 0;  // Frozen while crumbling.
+  float opacity = 1;      // Multiplied to the opacity of the frame.
+  float fall_y = 0;
+  float fall_rotation = 0;  // Degrees.
+};
+DopagakiPraiseView GetDopagakiPraiseView(const DopagakiPraise& praise);
+
 class DopagakiEffects {
  public:
   // Returns a number in [0, 1). Replaced in tests.
@@ -137,6 +190,10 @@ class DopagakiEffects {
   static constexpr double kEdgeIdleMs = 3000;
   // ... in this time.
   static constexpr double kEdgeFadeMs = 1000;
+  // Update 1 (UK3): at most this many praise words at once.
+  static constexpr size_t kMaxPraises = 3;
+  static constexpr double kPraiseExitMs = 150;
+  static constexpr double kPraiseCrumbleMs = 600;
 
   explicit DopagakiEffects(RandomFunction random);
   DopagakiEffects(const DopagakiEffects&) = delete;
@@ -161,6 +218,20 @@ class DopagakiEffects {
   void SetCandidateWindow(std::optional<DopagakiRect> rect);
   // Updates "x42". |pop| restarts the 1.5 -> 1 animation.
   void SetBadge(uint64_t combo, DopagakiRank rank, bool pop);
+
+  // Update 1: chooses the word, the style and the color of a new praise word
+  // of |tier| (1.2 to 1.5). |forced_style| and |forced_color| replace the
+  // random choice (phase U1 uses only "pop" with the rank color).
+  DopagakiPraiseChoice ChoosePraise(
+      DopagakiRank tier,
+      std::optional<DopagakiPraiseStyle> forced_style = std::nullopt,
+      std::optional<DopagakiPraiseColor> forced_color = std::nullopt);
+  // Places a praise word of |width| x |height| (measured by the caller, and
+  // not wider than 70% of the screen) away from |avoid|, the banner and the
+  // other words (1.6). Returns its id.
+  uint64_t AddPraise(const DopagakiPraiseChoice& choice, float width,
+                     float height, std::span<const DopagakiBox> avoid);
+  const std::vector<DopagakiPraise>& praises() const { return praises_; }
 
   // Advances all the effects by |elapsed_ms|.
   void Update(double elapsed_ms);
@@ -202,10 +273,14 @@ class DopagakiEffects {
     float lift = 1.5f;
     DopagakiRank rank = DopagakiRank::kB;
     std::optional<DopagakiColor> color;  // Uses the rank color if empty.
+    // Rainbow praise words: hsl(rainbow_hue + 0..300, 100%, 62%) instead.
+    std::optional<double> rainbow_hue;
     bool shard = false;
   };
 
   void Burst(float x, float y, int count, const BurstOptions& options);
+  void UpdatePraises(double elapsed_ms);
+  void FirePraiseEffect(const DopagakiPraise& praise);
   // Sparks flying inward from random points on the edges.
   void SpawnEdgeSparks(double frames);
   float GetIdleOpacity() const;
@@ -235,6 +310,8 @@ class DopagakiEffects {
   std::optional<DopagakiBadge> badge_;
   DopagakiRank badge_rank_ = DopagakiRank::kB;
   double badge_hue_ = 0;
+  DopagakiPraisePicker praise_picker_;
+  std::vector<DopagakiPraise> praises_;  // The oldest first.
 };
 
 }  // namespace win32

@@ -4,15 +4,18 @@
 #include "renderer/win32/dopagaki_effects.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_state.h"
 
 namespace mozc {
@@ -39,16 +42,16 @@ int RankIndex(DopagakiRank rank) { return static_cast<int>(rank); }
 
 double EaseOut(double t) { return DopagakiCubicBezier(0, 0, 0.58, 1, t); }
 
-// One dimension of a cubic Bezier curve from 0 to 1.
-double SampleCurve(double a1, double a2, double t) {
-  const double u = 1 - t;
-  return 3 * u * u * t * a1 + 3 * u * t * t * a2 + t * t * t;
-}
-
-double SampleCurveDerivative(double a1, double a2, double t) {
-  const double u = 1 - t;
-  return 3 * u * u * a1 + 6 * u * t * (a2 - a1) + 3 * t * t * (1 - a2);
-}
+// Update 1 (1.4): the complementary colors of B, A, S and SS.
+constexpr uint32_t kPraiseComplement[] = {0xFFA64D, 0xE33BA6, 0x3F6CFF,
+                                          0x4FFF76};
+constexpr uint32_t kPraiseGoldFill = 0xFFD23F;
+constexpr uint32_t kPraiseGoldGlow = 0xFFB300;
+// The banner area kept free while a banner is shown (1.6).
+constexpr float kBannerAreaLeft = 0.2f;
+constexpr float kBannerAreaTop = 0.32f;
+constexpr float kBannerAreaRight = 0.8f;
+constexpr float kBannerAreaBottom = 0.68f;
 
 double HueToRgb(double p, double q, double t) {
   if (t < 0) {
@@ -123,46 +126,6 @@ DopagakiColor DopagakiColorFromHsl(double hue, double saturation,
   return {static_cast<float>(HueToRgb(p, q, h + 1.0 / 3)),
           static_cast<float>(HueToRgb(p, q, h)),
           static_cast<float>(HueToRgb(p, q, h - 1.0 / 3))};
-}
-
-double DopagakiCubicBezier(double x1, double y1, double x2, double y2,
-                           double t) {
-  if (t <= 0) {
-    return 0;
-  }
-  if (t >= 1) {
-    return 1;
-  }
-  // Finds the curve parameter whose x is |t| (Newton's method first).
-  double u = t;
-  for (int i = 0; i < 8; ++i) {
-    const double error = SampleCurve(x1, x2, u) - t;
-    if (std::abs(error) < 1e-7) {
-      return SampleCurve(y1, y2, u);
-    }
-    const double derivative = SampleCurveDerivative(x1, x2, u);
-    if (std::abs(derivative) < 1e-6) {
-      break;
-    }
-    u -= error / derivative;
-  }
-  // Falls back to bisection.
-  double low = 0;
-  double high = 1;
-  u = t;
-  for (int i = 0; i < 60; ++i) {
-    const double x = SampleCurve(x1, x2, u);
-    if (std::abs(x - t) < 1e-7) {
-      break;
-    }
-    if (x < t) {
-      low = u;
-    } else {
-      high = u;
-    }
-    u = (low + high) / 2;
-  }
-  return SampleCurve(y1, y2, u);
 }
 
 double GetDopagakiBannerDurationMs(DopagakiBannerKind kind) {
@@ -258,8 +221,31 @@ float GetDopagakiEdgePulse(DopagakiRank rank, double edge_time) {
   }
 }
 
+DopagakiPraiseView GetDopagakiPraiseView(const DopagakiPraise& praise) {
+  DopagakiPraiseView view;
+  view.elapsed_ms = praise.crumbling ? praise.frozen_ms : praise.elapsed_ms;
+  view.t = praise.duration_ms > 0
+               ? std::clamp(view.elapsed_ms / praise.duration_ms, 0.0, 1.0)
+               : 1.0;
+  if (praise.crumbling) {
+    // crumblePraises() in preview.html.
+    const double u = std::clamp(
+        praise.crumble_ms / DopagakiEffects::kPraiseCrumbleMs, 0.0, 1.0);
+    const double seconds = praise.crumble_ms / 1000;
+    view.fall_y = static_cast<float>(0.5 * 1667 * seconds * seconds);
+    view.fall_rotation = static_cast<float>(praise.crumble_rotation * u);
+    view.opacity =
+        static_cast<float>(1 - DopagakiEaseValue(DopagakiEase::kIn, u));
+  }
+  if (praise.exiting) {
+    view.opacity *= static_cast<float>(std::clamp(
+        1 - praise.exit_ms / DopagakiEffects::kPraiseExitMs, 0.0, 1.0));
+  }
+  return view;
+}
+
 DopagakiEffects::DopagakiEffects(RandomFunction random)
-    : random_(std::move(random)) {}
+    : random_(std::move(random)), praise_picker_(random_) {}
 
 void DopagakiEffects::SetScreenSize(float width, float height) {
   width_ = std::max(width, 1.0f);
@@ -282,6 +268,7 @@ void DopagakiEffects::Clear() {
   idle_ms_ = kEdgeIdleMs + kEdgeFadeMs;
   candidate_window_.reset();
   badge_.reset();
+  praises_.clear();
 }
 
 void DopagakiEffects::SetEdgeRank(DopagakiRank rank) { edge_rank_ = rank; }
@@ -380,6 +367,189 @@ void DopagakiEffects::OnBreak(float origin_x, float origin_y) {
   StartBanner(DopagakiBannerKind::kBreak, L"BREAK",
               DopagakiColorFromRgb(kBreakColor));
   shake_amount_ = 14;
+  // Update 1 (1.9): the praise words crumble.
+  for (DopagakiPraise& praise : praises_) {
+    if (praise.crumbling || praise.exiting) {
+      continue;
+    }
+    praise.crumbling = true;
+    praise.crumble_ms = 0;
+    praise.frozen_ms =
+        std::max(0.0, std::min(praise.elapsed_ms, praise.duration_ms - 1));
+    const float sign = random_() < 0.5 ? -1.0f : 1.0f;
+    praise.crumble_rotation =
+        sign * static_cast<float>(30 + random_() * 30);
+    Burst(praise.x, praise.y, 12,
+          {.speed = 8,
+           .size = 4,
+           .color = DopagakiColorFromRgb(kBreakColor),
+           .shard = true});
+  }
+}
+
+DopagakiPraiseChoice DopagakiEffects::ChoosePraise(
+    DopagakiRank tier, std::optional<DopagakiPraiseStyle> forced_style,
+    std::optional<DopagakiPraiseColor> forced_color) {
+  DopagakiPraiseChoice choice;
+  choice.tier = tier;
+  choice.word = std::wstring(praise_picker_.NextWord(tier));
+  if (reduced_motion_) {
+    // 1.12: only fades.
+    choice.style = DopagakiPraiseStyle::kFade;
+  } else {
+    choice.style = forced_style.has_value() ? *forced_style
+                                            : praise_picker_.NextStyle();
+  }
+  choice.color = forced_color.has_value() ? *forced_color
+                                          : praise_picker_.NextColor(tier);
+  choice.font_size = GetDopagakiPraiseFontSize(tier, width_) *
+                     GetDopagakiPraiseStyleInfo(choice.style).size_scale;
+  choice.hue = hue_;
+
+  // makePaint() in preview.html.
+  const DopagakiColor rank_color = GetDopagakiRankColor(tier, hue_);
+  switch (choice.color) {
+    case DopagakiPraiseColor::kRank:
+      choice.fill = choice.glow = rank_color;
+      choice.particle = rank_color;
+      break;
+    case DopagakiPraiseColor::kWhite:
+      choice.fill = DopagakiColorFromRgb(0xFFFFFF);
+      choice.glow = rank_color;
+      choice.particle = rank_color;
+      break;
+    case DopagakiPraiseColor::kComplement: {
+      const DopagakiColor color =
+          tier == DopagakiRank::kSSS
+              ? DopagakiColorFromHsl(hue_ + 180, 1, 0.62)
+              : DopagakiColorFromRgb(kPraiseComplement[RankIndex(tier)]);
+      choice.fill = choice.glow = color;
+      choice.particle = color;
+      break;
+    }
+    case DopagakiPraiseColor::kGold:
+      choice.fill = DopagakiColorFromRgb(kPraiseGoldFill);
+      choice.glow = DopagakiColorFromRgb(kPraiseGoldGlow);
+      choice.particle = DopagakiColorFromRgb(kPraiseGoldFill);
+      break;
+    case DopagakiPraiseColor::kRainbow:
+      choice.fill = DopagakiColorFromHsl(hue_, 1, 0.62);
+      choice.glow = DopagakiColorFromRgb(0xFFFFFF);
+      choice.particle = std::nullopt;
+      break;
+  }
+  return choice;
+}
+
+uint64_t DopagakiEffects::AddPraise(const DopagakiPraiseChoice& choice,
+                                    float width, float height,
+                                    std::span<const DopagakiBox> avoid) {
+  const DopagakiPraiseStyleInfo& info =
+      GetDopagakiPraiseStyleInfo(choice.style);
+  DopagakiPraise praise;
+  praise.choice = choice;
+  praise.width = width;
+  praise.height = height;
+  praise.tilt = info.tilt_base +
+                static_cast<float>(random_() * 2 - 1) * info.tilt_range;
+
+  // pickPosition() in preview.html.
+  std::vector<DopagakiBox> boxes(avoid.begin(), avoid.end());
+  if (banner_.has_value()) {
+    boxes.push_back({width_ * kBannerAreaLeft, height_ * kBannerAreaTop,
+                     width_ * kBannerAreaRight, height_ * kBannerAreaBottom});
+  }
+  for (const DopagakiPraise& other : praises_) {
+    if (!other.crumbling && !other.exiting) {
+      boxes.push_back(other.box.Inflated(10));
+    }
+  }
+  const std::array<float, 2> box_size =
+      GetDopagakiPraiseBoxSize(width, height, praise.tilt);
+  const DopagakiPraisePosition position = PickDopagakiPraisePosition(
+      box_size[0], box_size[1], width_, height_, boxes, random_);
+  praise.x = position.x;
+  praise.y = position.y;
+  praise.box = position.box;
+  praise.side = position.x < width_ / 2 ? -1 : 1;
+  praise.duration_ms =
+      GetDopagakiPraiseDurationMs(choice.style, choice.word.size());
+  praise.id = next_id_++;
+  praises_.push_back(std::move(praise));
+
+  // 1.8 (UK3): the oldest one goes away when there are too many.
+  size_t alive = 0;
+  for (const DopagakiPraise& p : praises_) {
+    if (!p.crumbling && !p.exiting) {
+      ++alive;
+    }
+  }
+  if (alive > kMaxPraises) {
+    for (DopagakiPraise& p : praises_) {
+      if (!p.crumbling && !p.exiting) {
+        p.exiting = true;
+        p.exit_ms = 0;
+        break;
+      }
+    }
+  }
+  return praises_.back().id;
+}
+
+void DopagakiEffects::UpdatePraises(double elapsed_ms) {
+  for (DopagakiPraise& praise : praises_) {
+    if (praise.crumbling) {
+      praise.crumble_ms += elapsed_ms;
+    } else {
+      praise.elapsed_ms += elapsed_ms;
+      const DopagakiPraiseStyleInfo& info =
+          GetDopagakiPraiseStyleInfo(praise.choice.style);
+      if (!praise.effect_fired &&
+          praise.elapsed_ms >= info.effect_at * praise.duration_ms) {
+        praise.effect_fired = true;
+        FirePraiseEffect(praise);
+      }
+    }
+    if (praise.exiting) {
+      praise.exit_ms += elapsed_ms;
+    }
+  }
+  std::erase_if(praises_, [](const DopagakiPraise& praise) {
+    if (praise.crumbling) {
+      return praise.crumble_ms >= kPraiseCrumbleMs;
+    }
+    return praise.elapsed_ms >= praise.duration_ms ||
+           (praise.exiting && praise.exit_ms >= kPraiseExitMs);
+  });
+}
+
+// firePraiseFx() in preview.html.
+void DopagakiEffects::FirePraiseEffect(const DopagakiPraise& praise) {
+  const DopagakiPraiseStyleInfo& info =
+      GetDopagakiPraiseStyleInfo(praise.choice.style);
+  const DopagakiRank tier = praise.choice.tier;
+  const float t = static_cast<float>(RankIndex(tier));
+  BurstOptions options;
+  options.color = praise.choice.particle;
+  if (!praise.choice.particle.has_value()) {
+    options.rainbow_hue = praise.choice.hue;
+  }
+  switch (info.effect) {
+    case DopagakiPraiseEffect::kNone:
+      return;
+    case DopagakiPraiseEffect::kBurst:
+      options.speed = 5 + 0.8f * t;
+      options.size = 2.5f + 0.5f * t;
+      Burst(praise.x, praise.y, GetDopagakiPraiseBurstCount(tier), options);
+      return;
+    case DopagakiPraiseEffect::kImpact:
+      // The shockwave and the shaking come with the 12 styles (phase U2).
+      options.speed = 6 + t;
+      options.size = 3 + 0.5f * t;
+      Burst(praise.x, praise.y, GetDopagakiPraiseImpactBurstCount(tier),
+            options);
+      return;
+  }
 }
 
 void DopagakiEffects::ShowComboLabel(uint64_t combo, DopagakiRank rank,
@@ -466,12 +636,15 @@ void DopagakiEffects::Update(double elapsed_ms) {
       }
     }
   }
+
+  UpdatePraises(elapsed_ms);
 }
 
 bool DopagakiEffects::IsActive() const {
   return !particles_.empty() || banner_.has_value() ||
          combo_label_.has_value() || flash_opacity() > 0 ||
-         shake_amount_ > 0.2f || IsEdgeVisible() || IsCandidateFrameVisible();
+         shake_amount_ > 0.2f || IsEdgeVisible() ||
+         IsCandidateFrameVisible() || !praises_.empty();
 }
 
 void DopagakiEffects::SpawnEdgeSparks(double frames) {
@@ -550,8 +723,13 @@ void DopagakiEffects::Burst(float x, float y, int count,
     p.life = 1;
     p.decay = static_cast<float>(0.012 + random_() * 0.02);
     p.size = static_cast<float>(options.size * (0.5 + random_()));
-    p.color = options.color.has_value() ? *options.color
-                                        : GetParticleColor(options.rank);
+    if (options.rainbow_hue.has_value()) {
+      p.color =
+          DopagakiColorFromHsl(*options.rainbow_hue + random_() * 300, 1, 0.62);
+    } else {
+      p.color = options.color.has_value() ? *options.color
+                                          : GetParticleColor(options.rank);
+    }
     p.shard = options.shard;
     p.rotation = static_cast<float>(random_() * 6);
     particles_.push_back(p);

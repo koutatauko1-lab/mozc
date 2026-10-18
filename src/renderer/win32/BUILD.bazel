@@ -289,6 +289,7 @@ mozc_cc_library(
         ":candidate_window",
         ":dopagaki_effects",
         ":dopagaki_overlay",
+        ":dopagaki_praise",
         ":dopagaki_sound_synth",
         ":dopagaki_state",
         "//base:const",
@@ -344,7 +345,10 @@ mozc_cc_library(
     hdrs = ["dopagaki_effects.h"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
-    deps = [":dopagaki_state"],
+    deps = [
+        ":dopagaki_praise",
+        ":dopagaki_state",
+    ],
 )
 
 mozc_cc_test(
@@ -354,6 +358,29 @@ mozc_cc_test(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":dopagaki_effects",
+        ":dopagaki_praise",
+        ":dopagaki_state",
+        "//testing:gunit_main",
+    ],
+)
+
+# Dopagaki update 1: praise words as pure logic. No Windows API is used.
+mozc_cc_library(
+    name = "dopagaki_praise",
+    srcs = ["dopagaki_praise.cc"],
+    hdrs = ["dopagaki_praise.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [":dopagaki_state"],
+)
+
+mozc_cc_test(
+    name = "dopagaki_praise_test",
+    srcs = ["dopagaki_praise_test.cc"],
+    tags = MOZC_TAGS.WIN_ONLY + ["dopagaki"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":dopagaki_praise",
         ":dopagaki_state",
         "//testing:gunit_main",
     ],
@@ -392,6 +419,8 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":dopagaki_effects",
+        ":dopagaki_praise",
+        ":dopagaki_state",
         "//bazel/win32:d2d1",
         "//bazel/win32:d3d11",
         "//bazel/win32:dcomp",

@@ -35,6 +35,12 @@ struct DopagakiAction {
     kKeys,    // |count| keystrokes were added to the combo.
     kBreak,   // The combo was broken. |count| is the combo before the break.
     kRankUp,  // The rank went up to |rank|.
+    // Update 1: the combo passed 200, 300, ... |count| is the highest
+    // multiple of 100 passed, and |rank| is kSSS.
+    kMilestone,
+    // Update 1: the combo passed a multiple of 5. |count| is the highest one
+    // passed, and |rank| is the rank of |count|.
+    kPraise,
   };
   Type type = Type::kKeys;
   uint64_t count = 0;
@@ -58,7 +64,8 @@ class DopagakiState {
   DopagakiState& operator=(const DopagakiState&) = delete;
 
   // Updates the combo with |event| received at |now|. When a break and new
-  // keystrokes arrive together, kBreak comes first.
+  // keystrokes arrive together, kBreak comes first. Keystrokes give kKeys,
+  // then kRankUp, kMilestone and kPraise if they happened.
   std::vector<DopagakiAction> OnEvent(const commands::DopagakiEvent& event,
                                       absl::Time now);
 

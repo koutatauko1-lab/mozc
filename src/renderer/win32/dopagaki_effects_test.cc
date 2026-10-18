@@ -6,8 +6,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
+#include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_state.h"
 #include "testing/gunit.h"
 
@@ -417,6 +419,146 @@ TEST(DopagakiEffectsTest, ParticlesAreLimited) {
     effects.OnBreak(100, 100);
   }
   EXPECT_EQ(effects.particles().size(), DopagakiEffects::kMaxParticles);
+}
+
+// Update 1.
+void Advance(DopagakiEffects& effects, double ms) {
+  for (double t = 0; t < ms; t += kOneFrameMs) {
+    effects.Update(kOneFrameMs);
+  }
+}
+
+uint64_t AddPop(DopagakiEffects& effects, DopagakiRank tier) {
+  const DopagakiPraiseChoice choice = effects.ChoosePraise(
+      tier, DopagakiPraiseStyle::kPop, DopagakiPraiseColor::kRank);
+  return effects.AddPraise(choice, 200, 60, {});
+}
+
+TEST(DopagakiEffectsTest, ChoosePraise) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  const DopagakiPraiseChoice choice = effects.ChoosePraise(
+      DopagakiRank::kA, DopagakiPraiseStyle::kPop, DopagakiPraiseColor::kRank);
+  EXPECT_EQ(choice.style, DopagakiPraiseStyle::kPop);
+  EXPECT_EQ(choice.color, DopagakiPraiseColor::kRank);
+  EXPECT_EQ(choice.tier, DopagakiRank::kA);
+  EXPECT_NEAR(choice.font_size, 64 * 1.2f, 1e-3);
+  EXPECT_EQ(choice.fill, GetDopagakiRankColor(DopagakiRank::kA, 0));
+  EXPECT_EQ(choice.glow, choice.fill);
+  ASSERT_TRUE(choice.particle.has_value());
+  bool found = false;
+  for (const std::wstring_view word :
+       GetDopagakiPraiseWords(DopagakiRank::kA)) {
+    found |= word == choice.word;
+  }
+  EXPECT_TRUE(found);
+
+  // Only fades when the Windows animation setting is off.
+  effects.SetReducedMotion(true);
+  EXPECT_EQ(effects
+                .ChoosePraise(DopagakiRank::kA, DopagakiPraiseStyle::kPop,
+                              DopagakiPraiseColor::kRank)
+                .style,
+            DopagakiPraiseStyle::kFade);
+}
+
+TEST(DopagakiEffectsTest, PraiseComesAndGoes) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  EXPECT_FALSE(effects.IsActive());
+  const uint64_t id = AddPop(effects, DopagakiRank::kB);
+  ASSERT_EQ(effects.praises().size(), 1u);
+  EXPECT_EQ(effects.praises()[0].id, id);
+  EXPECT_DOUBLE_EQ(effects.praises()[0].duration_ms, 1300);
+  EXPECT_TRUE(effects.IsActive());
+  // "pop" bursts at the start.
+  effects.Update(kOneFrameMs);
+  EXPECT_FALSE(effects.particles().empty());
+  Advance(effects, 1300);
+  EXPECT_TRUE(effects.praises().empty());
+  // The particles also go away in the end.
+  Advance(effects, 4000);
+  EXPECT_FALSE(effects.IsActive());
+}
+
+TEST(DopagakiEffectsTest, PraiseStaysOnTheScreen) {
+  DopagakiEffects effects(Fixed(0.99));
+  effects.SetScreenSize(1920, 1080);
+  AddPop(effects, DopagakiRank::kSSS);
+  const DopagakiPraise& praise = effects.praises()[0];
+  EXPECT_GE(praise.box.left, 0);
+  EXPECT_GE(praise.box.top, 0);
+  EXPECT_LE(praise.box.right, 1920);
+  EXPECT_LE(praise.box.bottom, 1080);
+  EXPECT_EQ(praise.side, 1);
+}
+
+TEST(DopagakiEffectsTest, FourthPraisePushesOutTheOldest) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  const uint64_t first = AddPop(effects, DopagakiRank::kA);
+  AddPop(effects, DopagakiRank::kA);
+  AddPop(effects, DopagakiRank::kA);
+  for (const DopagakiPraise& praise : effects.praises()) {
+    EXPECT_FALSE(praise.exiting);
+  }
+  AddPop(effects, DopagakiRank::kA);
+  ASSERT_EQ(effects.praises().size(), 4u);
+  EXPECT_TRUE(effects.praises()[0].exiting);
+  EXPECT_EQ(effects.praises()[0].id, first);
+  EXPECT_FALSE(effects.praises()[1].exiting);
+  Advance(effects, 100);
+  EXPECT_EQ(effects.praises().size(), 4u);
+  EXPECT_LT(GetDopagakiPraiseView(effects.praises()[0]).opacity, 0.5f);
+  Advance(effects, 60);
+  ASSERT_EQ(effects.praises().size(), 3u);
+  EXPECT_NE(effects.praises()[0].id, first);
+}
+
+TEST(DopagakiEffectsTest, PraiseCrumblesOnBreak) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  AddPop(effects, DopagakiRank::kA);
+  AddPop(effects, DopagakiRank::kA);
+  Advance(effects, 200);
+  const size_t particles = effects.particles().size();
+  effects.OnBreak(100, 100);
+  ASSERT_EQ(effects.praises().size(), 2u);
+  for (const DopagakiPraise& praise : effects.praises()) {
+    EXPECT_TRUE(praise.crumbling);
+    // Frozen where it was.
+    const double frozen = GetDopagakiPraiseView(praise).elapsed_ms;
+    EXPECT_NEAR(frozen, praise.frozen_ms, 1e-9);
+  }
+  // 12 red shards each, besides the shards of BREAK itself.
+  EXPECT_GE(effects.particles().size(), particles + 24);
+  Advance(effects, 300);
+  const DopagakiPraiseView view = GetDopagakiPraiseView(effects.praises()[0]);
+  EXPECT_GT(view.fall_y, 0);
+  EXPECT_LT(view.opacity, 1);
+  EXPECT_NEAR(view.elapsed_ms, effects.praises()[0].frozen_ms, 1e-9);
+  Advance(effects, 320);
+  EXPECT_TRUE(effects.praises().empty());
+}
+
+TEST(DopagakiEffectsTest, PraiseKeepsAwayFromTheBanner) {
+  DopagakiEffects effects(Fixed(0.5));
+  effects.SetScreenSize(1920, 1080);
+  effects.OnRankUp(DopagakiRank::kA);
+  AddPop(effects, DopagakiRank::kA);
+  const DopagakiBox banner = {1920 * 0.2f, 1080 * 0.32f, 1920 * 0.8f,
+                              1080 * 0.68f};
+  // With a fixed random number, every try is the center. The least bad one is
+  // still returned.
+  EXPECT_EQ(effects.praises().size(), 1u);
+  EXPECT_GT(GetDopagakiBoxOverlap(effects.praises()[0].box, banner), 0);
+}
+
+TEST(DopagakiEffectsTest, ClearRemovesPraises) {
+  DopagakiEffects effects(Fixed(0.3));
+  AddPop(effects, DopagakiRank::kB);
+  effects.Clear();
+  EXPECT_TRUE(effects.praises().empty());
 }
 
 }  // namespace
