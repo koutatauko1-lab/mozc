@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -85,21 +86,49 @@ class DopagakiOverlay {
   };
   // Update 1: a praise word measured with its font.
   struct PraiseText {
+    wil::com_ptr_nothrow<IDWriteTextFormat> format;
     wil::com_ptr_nothrow<IDWriteTextLayout> layout;
     float width = 0;   // The advance width.
     float height = 0;  // The ink with 6% of the font size above and below.
-    // The center of the box above in the coordinates of the layout.
-    float center_x = 0;
-    float center_y = 0;
+    // The box above in the coordinates of the layout.
+    float left = 0;
+    float top = 0;
+    float bottom = 0;
+    // The center of each letter from the center of the word, and where each
+    // letter starts from the start of the word (wave and scatter).
+    std::vector<float> letter_x;
+    std::vector<float> letter_start;
   };
-  // Update 1: the image of a praise word, centered at (anchor_x, anchor_y).
-  struct PraiseSprite {
-    uint64_t id = 0;
+  // Update 1: an image of a praise word or a letter, centered at
+  // (anchor_x, anchor_y).
+  struct PraiseImage {
     wil::com_ptr_nothrow<ID2D1Bitmap1> bitmap;
     float bitmap_width = 0;
     float bitmap_height = 0;
     float anchor_x = 0;
     float anchor_y = 0;
+  };
+  struct PraiseSprite {
+    uint64_t id = 0;
+    PraiseImage word;
+    // glitch: the cyan and magenta copies without glows.
+    PraiseImage cyan;
+    PraiseImage magenta;
+    // wave and scatter: one image per letter (empty for spaces).
+    std::vector<PraiseImage> letters;
+  };
+  // How to make a PraiseImage.
+  struct PraiseImageOptions {
+    IDWriteTextLayout* layout = nullptr;  // The word or one letter.
+    // The box of the word in the coordinates of |layout|.
+    float top = 0;
+    float bottom = 0;
+    // Rainbow: where the word starts from where |layout| starts, and the
+    // width of the word (a letter shows its part of the gradient).
+    float gradient_x = 0;
+    float gradient_width = 0;
+    // glitch: drawn in this color without glows and shadow.
+    std::optional<DopagakiColor> plain;
   };
 
   static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
@@ -137,9 +166,16 @@ class DopagakiOverlay {
   bool MeasurePraise(const DopagakiPraiseChoice& choice, PraiseText* text);
   bool CreatePraiseSprite(const DopagakiPraiseChoice& choice,
                           const PraiseText& text, PraiseSprite* sprite);
+  bool CreatePraiseImage(const DopagakiPraiseChoice& choice,
+                         const PraiseImageOptions& options, PraiseImage* image);
+  wil::com_ptr_nothrow<ID2D1Brush> CreatePraiseFill(
+      const DopagakiPraiseChoice& choice, const PraiseImageOptions& options,
+      float text_left, float top, float bottom);
   // Drops the images of the words that are gone.
   void UpdatePraiseCache();
   void DrawPraises();
+  void DrawPraiseImage(const PraiseImage& image,
+                       const D2D1::Matrix3x2F& transform, float opacity);
   int width_pixels() const { return monitor_rect_.right - monitor_rect_.left; }
   int height_pixels() const {
     return monitor_rect_.bottom - monitor_rect_.top;

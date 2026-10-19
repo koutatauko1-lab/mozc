@@ -8,6 +8,7 @@
 #include <optional>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "renderer/win32/dopagaki_praise.h"
 #include "renderer/win32/dopagaki_state.h"
@@ -431,7 +432,18 @@ void Advance(DopagakiEffects& effects, double ms) {
 uint64_t AddPop(DopagakiEffects& effects, DopagakiRank tier) {
   const DopagakiPraiseChoice choice = effects.ChoosePraise(
       tier, DopagakiPraiseStyle::kPop, DopagakiPraiseColor::kRank);
-  return effects.AddPraise(choice, 200, 60, {});
+  return effects.AddPraise(choice, 200, 60, {}, {});
+}
+
+uint64_t AddStyle(DopagakiEffects& effects, DopagakiRank tier,
+                  DopagakiPraiseStyle style) {
+  const DopagakiPraiseChoice choice =
+      effects.ChoosePraise(tier, style, DopagakiPraiseColor::kRank);
+  std::vector<float> letter_x;
+  for (size_t i = 0; i < choice.word.size(); ++i) {
+    letter_x.push_back(static_cast<float>(i) * 20 - 50);
+  }
+  return effects.AddPraise(choice, 200, 60, letter_x, {});
 }
 
 TEST(DopagakiEffectsTest, ChoosePraise) {
@@ -557,8 +569,78 @@ TEST(DopagakiEffectsTest, PraiseKeepsAwayFromTheBanner) {
 TEST(DopagakiEffectsTest, ClearRemovesPraises) {
   DopagakiEffects effects(Fixed(0.3));
   AddPop(effects, DopagakiRank::kB);
+  AddStyle(effects, DopagakiRank::kB, DopagakiPraiseStyle::kSlam);
+  Advance(effects, 200);
+  EXPECT_FALSE(effects.rings().empty());
   effects.Clear();
   EXPECT_TRUE(effects.praises().empty());
+  EXPECT_TRUE(effects.rings().empty());
+}
+
+TEST(DopagakiEffectsTest, SlamMakesShockwave) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  AddStyle(effects, DopagakiRank::kSS, DopagakiPraiseStyle::kSlam);
+  // t = 0.1 is at 130 ms.
+  Advance(effects, 100);
+  EXPECT_TRUE(effects.rings().empty());
+  Advance(effects, 50);
+  ASSERT_EQ(effects.rings().size(), 1u);
+  EXPECT_NEAR(effects.rings()[0].radius_from, 200 * 0.3f, 1e-4);
+  EXPECT_NEAR(effects.rings()[0].radius_to, 200 * 0.9f, 1e-4);
+  EXPECT_GE(effects.shake_amount(),
+            GetDopagakiPraiseShake(DopagakiRank::kSS) * 0.8f);
+  Advance(effects, 500);
+  EXPECT_TRUE(effects.rings().empty());
+}
+
+TEST(DopagakiEffectsTest, NoShockwaveWithReducedMotion) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  effects.SetReducedMotion(true);
+  AddStyle(effects, DopagakiRank::kSS, DopagakiPraiseStyle::kSlam);
+  EXPECT_EQ(effects.praises()[0].choice.style, DopagakiPraiseStyle::kFade);
+  Advance(effects, 300);
+  EXPECT_TRUE(effects.rings().empty());
+  EXPECT_FLOAT_EQ(effects.shake_amount(), 0);
+}
+
+TEST(DopagakiEffectsTest, ScatterFliesApart) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  AddStyle(effects, DopagakiRank::kA, DopagakiPraiseStyle::kScatter);
+  const DopagakiPraise& praise = effects.praises()[0];
+  EXPECT_EQ(praise.letter_x.size(), praise.choice.word.size());
+  EXPECT_EQ(praise.letter_random.size(), praise.choice.word.size());
+  const double duration = praise.duration_ms;
+  EXPECT_GE(duration, 1500);
+  Advance(effects, duration - 400);
+  ASSERT_EQ(effects.praises().size(), 1u);
+  EXPECT_FALSE(effects.praises()[0].exploded);
+  const size_t particles = effects.particles().size();
+  Advance(effects, 100);
+  ASSERT_EQ(effects.praises().size(), 1u);
+  EXPECT_TRUE(effects.praises()[0].exploded);
+  EXPECT_GT(effects.particles().size(), particles);
+}
+
+TEST(DopagakiEffectsTest, GlitchNoise) {
+  DopagakiEffects effects(Fixed(0.9));
+  effects.SetScreenSize(1920, 1080);
+  AddStyle(effects, DopagakiRank::kA, DopagakiPraiseStyle::kGlitch);
+  const DopagakiPraise& praise = effects.praises()[0];
+  EXPECT_NEAR(praise.glitch_x, 8, 1e-4);
+  EXPECT_NEAR(praise.glitch_flicker, 0.94f, 1e-4);
+  EXPECT_NEAR(praise.glitch_bands[0], 19.2f, 1e-4);
+  EXPECT_TRUE(IsDopagakiPraiseGlitching(praise, 0.1));
+  EXPECT_FALSE(IsDopagakiPraiseGlitching(praise, 0.5));
+  EXPECT_TRUE(IsDopagakiPraiseGlitching(praise, 0.9));
+  EXPECT_NEAR(GetDopagakiGlitchSplit(0), 14, 1e-4);
+  EXPECT_NEAR(GetDopagakiGlitchSplit(0.28), 2, 1e-4);
+  EXPECT_NEAR(GetDopagakiGlitchSplit(1), 14, 1e-4);
+  // Not glitching while crumbling.
+  effects.OnBreak(0, 0);
+  EXPECT_FALSE(IsDopagakiPraiseGlitching(effects.praises()[0], 0.1));
 }
 
 }  // namespace

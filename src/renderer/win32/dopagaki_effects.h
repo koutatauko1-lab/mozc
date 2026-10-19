@@ -4,6 +4,7 @@
 #ifndef MOZC_RENDERER_WIN32_DOPAGAKI_EFFECTS_H_
 #define MOZC_RENDERER_WIN32_DOPAGAKI_EFFECTS_H_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -166,6 +167,32 @@ struct DopagakiPraise {
   // A newer word pushed this one out (1.8): fades in 150 ms.
   bool exiting = false;
   double exit_ms = 0;
+  // wave and scatter (1.3.2): the center of each letter from the center of
+  // the word, and the random values of scatter.
+  std::vector<float> letter_x;
+  std::vector<DopagakiPraiseLetterRandom> letter_random;
+  bool exploded = false;  // scatter flew apart.
+  // glitch (1.3.3): re-rolled every 50 ms in the noise windows.
+  double glitch_next_ms = 0;
+  float glitch_x = 0;
+  float glitch_skew = 0;
+  float glitch_flicker = 1;
+  std::array<float, 3> glitch_bands = {};
+};
+
+// Update 1 (1.3.3): true while glitch draws its noise.
+bool IsDopagakiPraiseGlitching(const DopagakiPraise& praise, double t);
+// The distance of the cyan and magenta copies of glitch at |t|.
+float GetDopagakiGlitchSplit(double t);
+
+// Update 1 (1.7): the shockwave of slam and stamp.
+struct DopagakiRing {
+  float x = 0;
+  float y = 0;
+  float radius_from = 0;
+  float radius_to = 0;
+  DopagakiColor color;
+  double elapsed_ms = 0;
 };
 
 // How to draw a praise word at the current moment.
@@ -194,6 +221,8 @@ class DopagakiEffects {
   static constexpr size_t kMaxPraises = 3;
   static constexpr double kPraiseExitMs = 150;
   static constexpr double kPraiseCrumbleMs = 600;
+  static constexpr double kRingDurationMs = 450;
+  static constexpr double kGlitchRollMs = 50;
 
   explicit DopagakiEffects(RandomFunction random);
   DopagakiEffects(const DopagakiEffects&) = delete;
@@ -228,10 +257,13 @@ class DopagakiEffects {
       std::optional<DopagakiPraiseColor> forced_color = std::nullopt);
   // Places a praise word of |width| x |height| (measured by the caller, and
   // not wider than 70% of the screen) away from |avoid|, the banner and the
-  // other words (1.6). Returns its id.
+  // other words (1.6). |letter_x| is the center of each letter from the
+  // center of the word, used by wave and scatter. Returns its id.
   uint64_t AddPraise(const DopagakiPraiseChoice& choice, float width,
-                     float height, std::span<const DopagakiBox> avoid);
+                     float height, std::span<const float> letter_x,
+                     std::span<const DopagakiBox> avoid);
   const std::vector<DopagakiPraise>& praises() const { return praises_; }
+  const std::vector<DopagakiRing>& rings() const { return rings_; }
 
   // Advances all the effects by |elapsed_ms|.
   void Update(double elapsed_ms);
@@ -281,6 +313,8 @@ class DopagakiEffects {
   void Burst(float x, float y, int count, const BurstOptions& options);
   void UpdatePraises(double elapsed_ms);
   void FirePraiseEffect(const DopagakiPraise& praise);
+  void RollGlitch(DopagakiPraise& praise);
+  BurstOptions GetPraiseBurstOptions(const DopagakiPraise& praise) const;
   // Sparks flying inward from random points on the edges.
   void SpawnEdgeSparks(double frames);
   float GetIdleOpacity() const;
@@ -312,6 +346,7 @@ class DopagakiEffects {
   double badge_hue_ = 0;
   DopagakiPraisePicker praise_picker_;
   std::vector<DopagakiPraise> praises_;  // The oldest first.
+  std::vector<DopagakiRing> rings_;
 };
 
 }  // namespace win32

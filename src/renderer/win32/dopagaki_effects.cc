@@ -244,6 +244,21 @@ DopagakiPraiseView GetDopagakiPraiseView(const DopagakiPraise& praise) {
   return view;
 }
 
+bool IsDopagakiPraiseGlitching(const DopagakiPraise& praise, double t) {
+  if (!GetDopagakiPraiseStyleInfo(praise.choice.style).glitch ||
+      praise.crumbling) {
+    return false;
+  }
+  return (t >= 0 && t <= 0.28) || (t >= 0.8 && t <= 1);
+}
+
+float GetDopagakiGlitchSplit(double t) {
+  if (t < 0.5) {
+    return static_cast<float>(2 + 12 * (1 - t / 0.28));
+  }
+  return static_cast<float>(2 + 12 * ((t - 0.8) / 0.2));
+}
+
 DopagakiEffects::DopagakiEffects(RandomFunction random)
     : random_(std::move(random)), praise_picker_(random_) {}
 
@@ -269,6 +284,7 @@ void DopagakiEffects::Clear() {
   candidate_window_.reset();
   badge_.reset();
   praises_.clear();
+  rings_.clear();
 }
 
 void DopagakiEffects::SetEdgeRank(DopagakiRank rank) { edge_rank_ = rank; }
@@ -443,6 +459,7 @@ DopagakiPraiseChoice DopagakiEffects::ChoosePraise(
 
 uint64_t DopagakiEffects::AddPraise(const DopagakiPraiseChoice& choice,
                                     float width, float height,
+                                    std::span<const float> letter_x,
                                     std::span<const DopagakiBox> avoid) {
   const DopagakiPraiseStyleInfo& info =
       GetDopagakiPraiseStyleInfo(choice.style);
@@ -452,6 +469,18 @@ uint64_t DopagakiEffects::AddPraise(const DopagakiPraiseChoice& choice,
   praise.height = height;
   praise.tilt = info.tilt_base +
                 static_cast<float>(random_() * 2 - 1) * info.tilt_range;
+  if (info.letters != DopagakiPraiseLetters::kNone) {
+    praise.letter_x.assign(letter_x.begin(), letter_x.end());
+    praise.letter_x.resize(choice.word.size(), 0);
+    if (info.letters == DopagakiPraiseLetters::kScatter) {
+      for (size_t i = 0; i < choice.word.size(); ++i) {
+        praise.letter_random.push_back(MakeDopagakiPraiseLetterRandom(random_));
+      }
+    }
+  }
+  if (info.glitch) {
+    RollGlitch(praise);
+  }
 
   // pickPosition() in preview.html.
   std::vector<DopagakiBox> boxes(avoid.begin(), avoid.end());
@@ -509,6 +538,32 @@ void DopagakiEffects::UpdatePraises(double elapsed_ms) {
         praise.effect_fired = true;
         FirePraiseEffect(praise);
       }
+      // scatter: the letters fly apart 350 ms before the end (1.3.2).
+      if (info.letters == DopagakiPraiseLetters::kScatter &&
+          !praise.exploded &&
+          praise.elapsed_ms >= praise.duration_ms - 350) {
+        praise.exploded = true;
+        const double radians = praise.tilt * kPi / 180;
+        BurstOptions options = GetPraiseBurstOptions(praise);
+        options.speed = 6;
+        options.size = 3;
+        for (size_t i = 0; i < praise.choice.word.size(); ++i) {
+          if (praise.choice.word[i] == L' ') {
+            continue;
+          }
+          const float lx = praise.letter_x[i];
+          Burst(praise.x + lx * static_cast<float>(std::cos(radians)),
+                praise.y + lx * static_cast<float>(std::sin(radians)), 4,
+                options);
+        }
+      }
+      const double t = praise.duration_ms > 0
+                           ? praise.elapsed_ms / praise.duration_ms
+                           : 1.0;
+      if (IsDopagakiPraiseGlitching(praise, t) &&
+          praise.elapsed_ms >= praise.glitch_next_ms) {
+        RollGlitch(praise);
+      }
     }
     if (praise.exiting) {
       praise.exit_ms += elapsed_ms;
@@ -521,6 +576,33 @@ void DopagakiEffects::UpdatePraises(double elapsed_ms) {
     return praise.elapsed_ms >= praise.duration_ms ||
            (praise.exiting && praise.exit_ms >= kPraiseExitMs);
   });
+
+  for (DopagakiRing& ring : rings_) {
+    ring.elapsed_ms += elapsed_ms;
+  }
+  std::erase_if(rings_, [](const DopagakiRing& ring) {
+    return ring.elapsed_ms >= kRingDurationMs;
+  });
+}
+
+void DopagakiEffects::RollGlitch(DopagakiPraise& praise) {
+  praise.glitch_next_ms = praise.elapsed_ms + kGlitchRollMs;
+  praise.glitch_x = static_cast<float>((random_() - 0.5) * 20);
+  praise.glitch_skew = static_cast<float>((random_() - 0.5) * 20);
+  praise.glitch_flicker = static_cast<float>(0.4 + random_() * 0.6);
+  for (float& band : praise.glitch_bands) {
+    band = static_cast<float>((random_() - 0.5) * 48);
+  }
+}
+
+DopagakiEffects::BurstOptions DopagakiEffects::GetPraiseBurstOptions(
+    const DopagakiPraise& praise) const {
+  BurstOptions options;
+  options.color = praise.choice.particle;
+  if (!praise.choice.particle.has_value()) {
+    options.rainbow_hue = praise.choice.hue;
+  }
+  return options;
 }
 
 // firePraiseFx() in preview.html.
@@ -529,11 +611,7 @@ void DopagakiEffects::FirePraiseEffect(const DopagakiPraise& praise) {
       GetDopagakiPraiseStyleInfo(praise.choice.style);
   const DopagakiRank tier = praise.choice.tier;
   const float t = static_cast<float>(RankIndex(tier));
-  BurstOptions options;
-  options.color = praise.choice.particle;
-  if (!praise.choice.particle.has_value()) {
-    options.rainbow_hue = praise.choice.hue;
-  }
+  BurstOptions options = GetPraiseBurstOptions(praise);
   switch (info.effect) {
     case DopagakiPraiseEffect::kNone:
       return;
@@ -543,7 +621,17 @@ void DopagakiEffects::FirePraiseEffect(const DopagakiPraise& praise) {
       Burst(praise.x, praise.y, GetDopagakiPraiseBurstCount(tier), options);
       return;
     case DopagakiPraiseEffect::kImpact:
-      // The shockwave and the shaking come with the 12 styles (phase U2).
+      // 1.12: no shockwave and no shaking with the Windows animation setting
+      // off. The particles are fine.
+      if (!reduced_motion_) {
+        rings_.push_back({.x = praise.x,
+                          .y = praise.y,
+                          .radius_from = praise.width * 0.3f,
+                          .radius_to = praise.width * 0.9f,
+                          .color = praise.choice.particle.value_or(
+                              DopagakiColorFromRgb(0xFFFFFF))});
+        shake_amount_ = std::max(shake_amount_, GetDopagakiPraiseShake(tier));
+      }
       options.speed = 6 + t;
       options.size = 3 + 0.5f * t;
       Burst(praise.x, praise.y, GetDopagakiPraiseImpactBurstCount(tier),
@@ -644,7 +732,7 @@ bool DopagakiEffects::IsActive() const {
   return !particles_.empty() || banner_.has_value() ||
          combo_label_.has_value() || flash_opacity() > 0 ||
          shake_amount_ > 0.2f || IsEdgeVisible() ||
-         IsCandidateFrameVisible() || !praises_.empty();
+         IsCandidateFrameVisible() || !praises_.empty() || !rings_.empty();
 }
 
 void DopagakiEffects::SpawnEdgeSparks(double frames) {
