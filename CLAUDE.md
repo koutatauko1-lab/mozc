@@ -5,6 +5,7 @@
 
 **作業を始める前に、必ず `DOPAGAKI.md` を最後まで読んでください。** 仕様・設計・手順・進捗はすべてそこにあります。
 演出の数値と効果音の作り方の正解は `docs/dopagaki/preview.html` です。
+全プロジェクト共通のルール（`~/.claude/CLAUDE.md`）に出てくる `docs/SPEC.md` は `DOPAGAKI.md`、`docs/DESIGN.md` は `docs/dopagaki/preview.html` として扱ってください。
 
 ## 大事なルール
 
