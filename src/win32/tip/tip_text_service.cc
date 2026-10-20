@@ -939,6 +939,7 @@ class TipTextServiceImpl
         // Open the about dialog.
         return Process::OpenBrowser(kHelpUrl) ? S_OK : E_FAIL;
       case TipLangBarCallback::kDopagakiToggle:
+      case TipLangBarCallback::kDopagakiPraiseToggle:
       case TipLangBarCallback::kDopagakiSoundPico:
       case TipLangBarCallback::kDopagakiSoundTypewriter:
       case TipLangBarCallback::kDopagakiSoundHit:

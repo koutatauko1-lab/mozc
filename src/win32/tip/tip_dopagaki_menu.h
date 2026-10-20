@@ -15,7 +15,8 @@ namespace win32 {
 namespace tsf {
 
 // The Dopagaki items in the right-click menu of the input mode icon on the
-// taskbar (phase 6): "ドパガキ演出" (ON/OFF, K6) and the sound sets.
+// taskbar (phase 6): "ドパガキ演出" (ON/OFF, K6), "褒め言葉" (ON/OFF, update 1
+// UK1) and the sound sets.
 // The settings are saved by mozc_server as Config::dopagaki_config.
 class TipDopagakiMenu {
  public:

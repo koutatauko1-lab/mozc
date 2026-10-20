@@ -392,6 +392,8 @@ message Config {
     }
     optional bool enabled = 1 [default = true];
     optional SoundSet sound_set = 2 [default = PICO];
+    // Update 1 (UK1): the praise words every 5 combos and the milestones.
+    optional bool praise_enabled = 3 [default = true];
   }
   optional DopagakiConfig dopagaki_config = 7000;
 }

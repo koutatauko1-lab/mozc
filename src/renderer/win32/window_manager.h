@@ -97,6 +97,8 @@ class WindowManager {
   // Chosen from the menu (phase 6). Read from the config at startup and
   // updated by DopagakiEvent::settings.
   bool dopagaki_enabled_ = true;
+  // Update 1 (UK1).
+  bool dopagaki_praise_enabled_ = true;
   DopagakiSoundSet dopagaki_sound_set_ =
       config::Config::DopagakiConfig::PICO;
   // The positions of the candidate windows without shaking.

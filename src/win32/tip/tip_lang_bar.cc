@@ -226,6 +226,9 @@ HRESULT TipLangBar::InitLangBar(TipLangBarCallback* text_service) {
         {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiToggle,
          IDS_DOPAGAKI_TOGGLE, 0, 0},
+        // Update 1 (UK1): right below "ドパガキ演出".
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiPraiseToggle,
+         IDS_DOPAGAKI_PRAISE_TOGGLE, 0, 0},
         {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kDopagakiSoundPico,
          IDS_DOPAGAKI_SOUND_PICO, 0, 0},

@@ -58,6 +58,7 @@ std::unique_ptr<client::ClientInterface> NewClient() {
 
 bool TipDopagakiMenu::IsMenuItem(UINT item_id) {
   return item_id == TipLangBarCallback::kDopagakiToggle ||
+         item_id == TipLangBarCallback::kDopagakiPraiseToggle ||
          GetSoundSet(item_id).has_value();
 }
 
@@ -65,6 +66,9 @@ DWORD TipDopagakiMenu::GetMenuItemFlags(UINT item_id,
                                         const Settings& settings) {
   if (item_id == TipLangBarCallback::kDopagakiToggle) {
     return settings.enabled() ? TF_LBMENUF_CHECKED : 0;
+  }
+  if (item_id == TipLangBarCallback::kDopagakiPraiseToggle) {
+    return settings.praise_enabled() ? TF_LBMENUF_CHECKED : 0;
   }
   const std::optional<Settings::SoundSet> sound_set = GetSoundSet(item_id);
   if (sound_set.has_value() && *sound_set == settings.sound_set()) {
@@ -94,6 +98,8 @@ std::optional<Settings> TipDopagakiMenu::OnMenuSelect(UINT item_id) {
   Settings* settings = config.mutable_dopagaki_config();
   if (item_id == TipLangBarCallback::kDopagakiToggle) {
     settings->set_enabled(!settings->enabled());
+  } else if (item_id == TipLangBarCallback::kDopagakiPraiseToggle) {
+    settings->set_praise_enabled(!settings->praise_enabled());
   } else {
     settings->set_sound_set(*GetSoundSet(item_id));
   }

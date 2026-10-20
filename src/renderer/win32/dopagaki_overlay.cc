@@ -1528,6 +1528,28 @@ void DopagakiOverlay::UpdatePraiseCache() {
                           return praise.id == sprite.id;
                         });
   });
+  // The images are made when a word appears. They are made again here if
+  // they were dropped with the device (e.g. after a GPU reset).
+  if (!dwrite_factory_ || !context_) {
+    return;
+  }
+  for (const DopagakiPraise& praise : praises) {
+    if (std::any_of(praise_sprites_.begin(), praise_sprites_.end(),
+                    [&praise](const PraiseSprite& sprite) {
+                      return sprite.id == praise.id;
+                    })) {
+      continue;
+    }
+    PraiseSprite sprite;
+    PraiseText text;
+    if (!MeasurePraise(praise.choice, &text) ||
+        !CreatePraiseSprite(praise.choice, text, &sprite)) {
+      // Not tried again: an empty entry draws nothing.
+      sprite = {};
+    }
+    sprite.id = praise.id;
+    praise_sprites_.push_back(std::move(sprite));
+  }
 }
 
 void DopagakiOverlay::DrawPraiseImage(const PraiseImage& image,

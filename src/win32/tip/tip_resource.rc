@@ -182,6 +182,7 @@ BEGIN
     IDS_INDICATOR_WINDOW             "Mozc インジケータ ウィンドウ"
 #endif
     IDS_DOPAGAKI_TOGGLE             "ドパガキ演出"
+    IDS_DOPAGAKI_PRAISE_TOGGLE      "褒め言葉"
     IDS_DOPAGAKI_SOUND_PICO         "効果音：ピコピコ（8bit）"
     IDS_DOPAGAKI_SOUND_TYPEWRITER   "効果音：タイプライター"
     IDS_DOPAGAKI_SOUND_HIT          "効果音：打撃（格ゲー）"
@@ -232,6 +233,7 @@ BEGIN
     IDS_CANDIDATE_WINDOW             "Mozc Candidate Window"
 #endif
     IDS_DOPAGAKI_TOGGLE             "Dopagaki effects"
+    IDS_DOPAGAKI_PRAISE_TOGGLE      "Praise words"
     IDS_DOPAGAKI_SOUND_PICO         "Sound: Pico (8-bit)"
     IDS_DOPAGAKI_SOUND_TYPEWRITER   "Sound: Typewriter"
     IDS_DOPAGAKI_SOUND_HIT          "Sound: Hit (fighting game)"

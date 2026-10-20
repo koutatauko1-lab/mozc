@@ -480,12 +480,20 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
   }
   // The counters are followed even while the effects are off, so that the
   // keystrokes typed meanwhile do not appear at once when turned on again.
-  const std::vector<DopagakiAction> actions =
+  std::vector<DopagakiAction> actions =
       dopagaki_state_->OnEvent(event, absl::Now());
   if (!dopagaki_enabled_) {
     // K6: no effects and no sounds. The combo starts from 0 when turned on.
     dopagaki_state_->ResetCombo();
     return;
+  }
+  if (!dopagaki_praise_enabled_) {
+    // Update 1 (UK1): no praise words, no milestones and none of their
+    // sounds. Everything else stays.
+    std::erase_if(actions, [](const DopagakiAction& action) {
+      return action.type == DopagakiAction::Type::kPraise ||
+             action.type == DopagakiAction::Type::kMilestone;
+    });
   }
   if (actions.empty()) {
     return;
@@ -621,6 +629,7 @@ std::vector<DopagakiBox> WindowManager::GetDopagakiPraiseAvoidBoxes(
 void WindowManager::ApplyDopagakiSettings(
     const config::Config::DopagakiConfig& settings) {
   dopagaki_sound_set_ = settings.sound_set();
+  dopagaki_praise_enabled_ = settings.praise_enabled();
   const bool was_enabled = dopagaki_enabled_;
   dopagaki_enabled_ = settings.enabled();
   if (was_enabled && !dopagaki_enabled_) {
@@ -634,7 +643,8 @@ void WindowManager::ApplyDopagakiSettings(
   const std::wstring message =
       L"[dopagaki] settings: enabled=" +
       std::to_wstring(dopagaki_enabled_ ? 1 : 0) + L" sound_set=" +
-      std::to_wstring(static_cast<int>(dopagaki_sound_set_)) + L"\n";
+      std::to_wstring(static_cast<int>(dopagaki_sound_set_)) + L" praise=" +
+      std::to_wstring(dopagaki_praise_enabled_ ? 1 : 0) + L"\n";
   ::OutputDebugStringW(message.c_str());
 }
 

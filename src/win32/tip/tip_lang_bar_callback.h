@@ -69,6 +69,8 @@ class TipLangBarCallback : public IUnknown {
     kDopagakiSoundSparkle = 55,
     kDopagakiSoundMecha = 56,
     kDopagakiSoundMute = 57,
+    // Update 1 (UK1).
+    kDopagakiPraiseToggle = 58,
   };
 
   virtual ~TipLangBarCallback() = default;
