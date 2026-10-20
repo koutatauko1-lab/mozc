@@ -566,6 +566,50 @@ TEST(DopagakiEffectsTest, PraiseKeepsAwayFromTheBanner) {
   EXPECT_GT(GetDopagakiBoxOverlap(effects.praises()[0].box, banner), 0);
 }
 
+TEST(DopagakiEffectsTest, Milestone) {
+  DopagakiEffects effects(Fixed(0.3));
+  effects.SetScreenSize(1920, 1080);
+  effects.OnMilestone(300);
+  ASSERT_TRUE(effects.banner().has_value());
+  EXPECT_EQ(effects.banner()->kind, DopagakiBannerKind::kMilestone);
+  EXPECT_EQ(effects.banner()->text, L"300 COMBO!!");
+  bool found = false;
+  for (const std::wstring_view word : GetDopagakiMilestoneWords()) {
+    found |= word == effects.banner()->subtitle;
+  }
+  EXPECT_TRUE(found);
+  EXPECT_EQ(effects.particles().size(), 12u * 40u);
+  EXPECT_NEAR(effects.white_flash_opacity(), 0.35f, 1e-5);
+  EXPECT_GE(effects.shake_amount(), 16);
+  Advance(effects, 250);
+  EXPECT_GT(effects.white_flash_opacity(), 0);
+  EXPECT_LT(effects.white_flash_opacity(), 0.35f);
+  Advance(effects, 260);
+  EXPECT_FLOAT_EQ(effects.white_flash_opacity(), 0);
+  ASSERT_TRUE(effects.banner().has_value());
+  Advance(effects, 1200);
+  EXPECT_FALSE(effects.banner().has_value());
+}
+
+TEST(DopagakiEffectsTest, MilestoneBannerFrames) {
+  EXPECT_DOUBLE_EQ(GetDopagakiBannerDurationMs(DopagakiBannerKind::kMilestone),
+                   1700);
+  const DopagakiBannerFrame start =
+      GetDopagakiBannerFrame(DopagakiBannerKind::kMilestone, 0);
+  EXPECT_FLOAT_EQ(start.opacity, 0);
+  EXPECT_FLOAT_EQ(start.scale, 0.3f);
+  const DopagakiBannerFrame end =
+      GetDopagakiBannerFrame(DopagakiBannerKind::kMilestone, 1700);
+  EXPECT_FLOAT_EQ(end.opacity, 0);
+  EXPECT_FLOAT_EQ(end.scale, 1.5f);
+  // The word below appears later, at 0.2 to 0.3 of the duration.
+  EXPECT_FLOAT_EQ(GetDopagakiMilestoneSubtitleFrame(0.2 * 1700).opacity, 0);
+  const DopagakiBannerFrame sub = GetDopagakiMilestoneSubtitleFrame(0.3 * 1700);
+  EXPECT_NEAR(sub.opacity, 1, 1e-5);
+  EXPECT_NEAR(sub.scale, 1.08f, 1e-5);
+  EXPECT_NEAR(GetDopagakiMilestoneSubtitleFrame(1700).scale, 1.2f, 1e-5);
+}
+
 TEST(DopagakiEffectsTest, ClearRemovesPraises) {
   DopagakiEffects effects(Fixed(0.3));
   AddPop(effects, DopagakiRank::kB);

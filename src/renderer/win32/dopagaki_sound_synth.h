@@ -19,10 +19,17 @@ namespace win32 {
 
 using DopagakiSoundSet = config::Config::DopagakiConfig::SoundSet;
 
+// One sound per event, in this priority (update 1, 1.11): kBreak >
+// kMilestone > kRankUpPraise > kRankUp > kPraise > kKey. The values are sent
+// to the TIP and must not change.
 enum class DopagakiSoundKind {
-  kKey,     // Every keystroke.
-  kRankUp,  // A keystroke that raised the rank (instead of kKey).
-  kBreak,   // BackSpace.
+  kKey = 0,     // Every keystroke.
+  kRankUp = 1,  // A keystroke that raised the rank (instead of kKey).
+  kBreak = 2,   // BackSpace.
+  // Update 1.
+  kPraise = 3,        // A praise word (a multiple of 5).
+  kRankUpPraise = 4,  // A rank-up with a praise word.
+  kMilestone = 5,     // 200, 300, ...
 };
 
 inline constexpr int kDopagakiSampleRate = 48000;

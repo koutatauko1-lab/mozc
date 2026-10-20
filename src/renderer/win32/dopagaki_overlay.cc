@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <span>
 #include <string>
@@ -405,6 +406,7 @@ void DopagakiOverlay::ReleaseDevice() {
   praise_sprites_.clear();
   banner_cache_id_ = 0;
   banner_text_ = {};
+  banner_subtitle_text_ = {};
   combo_label_cache_id_ = 0;
   combo_label_text_ = {};
   badge_cache_id_ = 0;
@@ -551,10 +553,21 @@ bool DopagakiOverlay::DrawFrame() {
     context_->FillRectangle(D2D1::RectF(-40, -40, width + 40, height + 40),
                             brush_.get());
   }
+  // Update 1 (1.10): the white flash of a milestone, separate from BREAK.
+  const float white_flash = effects_.white_flash_opacity();
+  if (white_flash > 0) {
+    context_->SetTransform(base);
+    brush_->SetColor(D2D1::ColorF(1, 1, 1, white_flash));
+    context_->FillRectangle(D2D1::RectF(-40, -40, width + 40, height + 40),
+                            brush_.get());
+  }
 
   // "S RANK!!" or "BREAK" at the center of the screen.
   const auto& banner = effects_.banner();
-  if (banner.has_value() && banner_text_.bitmap) {
+  if (banner.has_value() &&
+      banner->kind == DopagakiBannerKind::kMilestone) {
+    DrawMilestoneBanner(*banner, base);
+  } else if (banner.has_value() && banner_text_.bitmap) {
     const DopagakiBannerFrame frame =
         GetDopagakiBannerFrame(banner->kind, banner->elapsed_ms);
     const D2D1_POINT_2F center = D2D1::Point2F(width / 2, height / 2);
@@ -857,6 +870,7 @@ void DopagakiOverlay::UpdateBannerCache() {
   if (!banner.has_value()) {
     banner_cache_id_ = 0;
     banner_text_ = {};
+    banner_subtitle_text_ = {};
     return;
   }
   if (banner->id == banner_cache_id_) {
@@ -864,19 +878,215 @@ void DopagakiOverlay::UpdateBannerCache() {
   }
   banner_cache_id_ = banner->id;
   banner_text_ = {};
-  // font-size: clamp(64px, 18vw, 220px) in the preview.
-  const float font_size = std::clamp(effects_.width() * 0.18f, 64.0f, 220.0f);
+  banner_subtitle_text_ = {};
   const bool has_impact = HasFontFamily(dwrite_factory_.get(), L"Impact");
-  wil::com_ptr_nothrow<IDWriteTextFormat> format;
-  if (FAILED(dwrite_factory_->CreateTextFormat(
-          has_impact ? L"Impact" : L"Arial Black", nullptr,
-          has_impact ? DWRITE_FONT_WEIGHT_NORMAL : DWRITE_FONT_WEIGHT_BLACK,
-          DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, font_size,
-          L"en-us", format.put()))) {
+  const auto create_format = [&](float font_size) {
+    wil::com_ptr_nothrow<IDWriteTextFormat> format;
+    if (FAILED(dwrite_factory_->CreateTextFormat(
+            has_impact ? L"Impact" : L"Arial Black", nullptr,
+            has_impact ? DWRITE_FONT_WEIGHT_NORMAL : DWRITE_FONT_WEIGHT_BLACK,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, font_size,
+            L"en-us", format.put()))) {
+      format.reset();
+    }
+    return format;
+  };
+
+  if (banner->kind == DopagakiBannerKind::kMilestone) {
+    // Update 1 (1.10): "200 COMBO!!" in the rainbow, and the word below.
+    const double hue = banner->hue;
+    const D2D1_COLOR_F white = D2D1::ColorF(1, 1, 1, 1);
+    const wil::com_ptr_nothrow<IDWriteTextFormat> main_format = create_format(
+        std::clamp(effects_.width() * 0.14f, 56.0f, 180.0f));
+    if (main_format) {
+      CreateMilestoneText(banner->text, main_format.get(), white, hue, white,
+                          18, ToD2DColor(DopagakiColorFromHsl(hue, 1, 0.6), 1),
+                          46, 6, &banner_text_);
+    }
+    const wil::com_ptr_nothrow<IDWriteTextFormat> subtitle_format =
+        create_format(std::clamp(effects_.width() * 0.06f, 26.0f, 76.0f));
+    if (subtitle_format && !banner->subtitle.empty()) {
+      CreateMilestoneText(
+          banner->subtitle, subtitle_format.get(), white, std::nullopt,
+          ToD2DColor(DopagakiColorFromHsl(hue, 1, 0.6), 1), 18,
+          ToD2DColor(DopagakiColorFromHsl(hue + 120, 1, 0.6), 1), 40, 4,
+          &banner_subtitle_text_);
+    }
+    return;
+  }
+
+  // font-size: clamp(64px, 18vw, 220px) in the preview.
+  const wil::com_ptr_nothrow<IDWriteTextFormat> format =
+      create_format(std::clamp(effects_.width() * 0.18f, 64.0f, 220.0f));
+  if (!format) {
     return;
   }
   CreateGlowText(banner->text, format.get(), ToD2DColor(banner->color, 1),
                  kBannerGlow1, kBannerGlow2, kBannerShadowY, &banner_text_);
+}
+
+bool DopagakiOverlay::CreateMilestoneText(
+    const std::wstring& text, IDWriteTextFormat* format,
+    const D2D1_COLOR_F& color, std::optional<double> rainbow_hue,
+    const D2D1_COLOR_F& glow1_color, float blur1,
+    const D2D1_COLOR_F& glow2_color, float blur2, float shadow_y,
+    GlowText* glow_text) {
+  wil::com_ptr_nothrow<IDWriteTextLayout> layout;
+  if (format == nullptr ||
+      FAILED(dwrite_factory_->CreateTextLayout(
+          text.c_str(), static_cast<UINT32>(text.size()), format, 10000,
+          10000, layout.put()))) {
+    return false;
+  }
+  DWRITE_TEXT_METRICS metrics = {};
+  if (FAILED(layout->GetMetrics(&metrics))) {
+    return false;
+  }
+  GlowText result;
+  result.text_width = metrics.widthIncludingTrailingWhitespace;
+  result.text_height = metrics.height;
+  result.padding = std::max(blur1, blur2) * 1.5f + shadow_y + 4;
+  result.bitmap_width = result.text_width + result.padding * 2;
+  result.bitmap_height = result.text_height + result.padding * 2;
+
+  const float scale = static_cast<float>(dpi_) / 96.0f;
+  const D2D1_SIZE_U pixel_size = D2D1::SizeU(
+      static_cast<UINT32>(std::ceil(result.bitmap_width * scale)),
+      static_cast<UINT32>(std::ceil(result.bitmap_height * scale)));
+  const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+      D2D1_BITMAP_OPTIONS_TARGET,
+      D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                        D2D1_ALPHA_MODE_PREMULTIPLIED),
+      static_cast<float>(dpi_), static_cast<float>(dpi_));
+  wil::com_ptr_nothrow<ID2D1Bitmap1> glow1_source;
+  wil::com_ptr_nothrow<ID2D1Bitmap1> glow2_source;
+  if (FAILED(context_->CreateBitmap(pixel_size, nullptr, 0, &properties,
+                                    glow1_source.put())) ||
+      FAILED(context_->CreateBitmap(pixel_size, nullptr, 0, &properties,
+                                    glow2_source.put())) ||
+      FAILED(context_->CreateBitmap(pixel_size, nullptr, 0, &properties,
+                                    result.bitmap.put()))) {
+    return false;
+  }
+  const D2D1_POINT_2F origin =
+      D2D1::Point2F(result.padding - metrics.left, result.padding);
+
+  // The text in each glow color, used as the sources of the glows.
+  HRESULT hr = S_OK;
+  for (const auto& [source, glow_color] :
+       {std::pair<ID2D1Bitmap1*, D2D1_COLOR_F>{glow1_source.get(),
+                                               glow1_color},
+        std::pair<ID2D1Bitmap1*, D2D1_COLOR_F>{glow2_source.get(),
+                                               glow2_color}}) {
+    if (FAILED(hr)) {
+      break;
+    }
+    context_->SetTarget(source);
+    context_->BeginDraw();
+    context_->SetTransform(D2D1::Matrix3x2F::Identity());
+    context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+    brush_->SetColor(glow_color);
+    context_->DrawTextLayout(origin, layout.get(), brush_.get());
+    hr = context_->EndDraw();
+  }
+
+  // The fill: the rainbow of the praise words from the left to the right.
+  wil::com_ptr_nothrow<ID2D1Brush> fill;
+  if (SUCCEEDED(hr) && rainbow_hue.has_value()) {
+    D2D1_GRADIENT_STOP stops[7];
+    for (int k = 0; k <= 6; ++k) {
+      stops[k] = {k / 6.0f,
+                  ToD2DColor(DopagakiColorFromHsl(*rainbow_hue + 50 * k, 1,
+                                                  0.62),
+                             1)};
+    }
+    wil::com_ptr_nothrow<ID2D1GradientStopCollection> collection;
+    wil::com_ptr_nothrow<ID2D1LinearGradientBrush> gradient;
+    if (SUCCEEDED(context_->CreateGradientStopCollection(stops, 7,
+                                                         collection.put())) &&
+        SUCCEEDED(context_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(
+                D2D1::Point2F(result.padding, 0),
+                D2D1::Point2F(result.padding + std::max(1.0f, metrics.width),
+                              0)),
+            collection.get(), gradient.put()))) {
+      fill = wil::com_ptr_nothrow<ID2D1Brush>(gradient.get());
+    }
+  }
+
+  // The glows, the black shadow and the text.
+  if (SUCCEEDED(hr)) {
+    context_->SetTarget(result.bitmap.get());
+    context_->BeginDraw();
+    context_->SetTransform(D2D1::Matrix3x2F::Identity());
+    context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+    for (const auto& [source, blur] :
+         {std::pair<ID2D1Bitmap1*, float>{glow2_source.get(), blur2},
+          std::pair<ID2D1Bitmap1*, float>{glow1_source.get(), blur1}}) {
+      wil::com_ptr_nothrow<ID2D1Effect> effect;
+      if (blur > 0 && SUCCEEDED(context_->CreateEffect(CLSID_D2D1GaussianBlur,
+                                                       effect.put()))) {
+        effect->SetInput(0, source);
+        effect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, blur / 2);
+        context_->DrawImage(effect.get());
+      }
+    }
+    if (shadow_y > 0) {
+      brush_->SetColor(D2D1::ColorF(0, 0, 0, 1));
+      context_->DrawTextLayout(D2D1::Point2F(origin.x, origin.y + shadow_y),
+                               layout.get(), brush_.get());
+    }
+    if (fill) {
+      context_->DrawTextLayout(origin, layout.get(), fill.get());
+    } else {
+      brush_->SetColor(color);
+      context_->DrawTextLayout(origin, layout.get(), brush_.get());
+    }
+    hr = context_->EndDraw();
+  }
+  context_->SetTarget(target_bitmap_.get());
+  if (FAILED(hr)) {
+    Log(L"milestone text drawing failed", hr);
+    return false;
+  }
+  *glow_text = std::move(result);
+  return true;
+}
+
+// showMilestone() in preview.html: the two lines are stacked at the center
+// (#banner is a centered column with line-height 1 and a gap of 0.15em).
+void DopagakiOverlay::DrawMilestoneBanner(const DopagakiBanner& banner,
+                                          const D2D1::Matrix3x2F& base) {
+  const float width = effects_.width();
+  const float height = effects_.height();
+  const float main_size = std::clamp(width * 0.14f, 56.0f, 180.0f);
+  const float subtitle_size = std::clamp(width * 0.06f, 26.0f, 76.0f);
+  const float gap = subtitle_size * 0.15f;
+  const float top = height / 2 - (main_size + gap + subtitle_size) / 2;
+  const auto draw = [&](const GlowText& text, const DopagakiBannerFrame& frame,
+                        float center_y) {
+    if (!text.bitmap || frame.opacity <= 0) {
+      return;
+    }
+    const D2D1_POINT_2F center = D2D1::Point2F(width / 2, center_y);
+    context_->SetTransform(
+        D2D1::Matrix3x2F::Scale(frame.scale, frame.scale, center) * base);
+    const float left = center.x - text.bitmap_width / 2;
+    const float rect_top = center.y - text.bitmap_height / 2;
+    const D2D1_RECT_F rect =
+        D2D1::RectF(left, rect_top, left + text.bitmap_width,
+                    rect_top + text.bitmap_height);
+    context_->DrawBitmap(text.bitmap.get(), &rect,
+                         std::clamp(frame.opacity, 0.0f, 1.0f),
+                         D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+  };
+  draw(banner_text_,
+       GetDopagakiBannerFrame(DopagakiBannerKind::kMilestone,
+                              banner.elapsed_ms),
+       top + main_size / 2);
+  draw(banner_subtitle_text_,
+       GetDopagakiMilestoneSubtitleFrame(banner.elapsed_ms),
+       top + main_size + gap + subtitle_size / 2);
 }
 
 void DopagakiOverlay::UpdateComboLabelCache() {

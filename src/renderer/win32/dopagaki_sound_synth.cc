@@ -139,7 +139,7 @@ bool DecodeDopagakiSoundRequest(uint32_t value, DopagakiSoundSet* sound_set,
   const int kind_value = static_cast<int>((value >> 8) & 0xFF);
   const int rank_value = static_cast<int>(value & 0xFF);
   if ((value >> 24) != 0 || !DopagakiConfig::SoundSet_IsValid(set_value) ||
-      kind_value > static_cast<int>(DopagakiSoundKind::kBreak) ||
+      kind_value > static_cast<int>(DopagakiSoundKind::kMilestone) ||
       rank_value > 4) {
     return false;
   }
@@ -168,9 +168,11 @@ std::vector<float> SynthesizeDopagakiSound(
     AddDopagakiNoise(duration, volume, highpass, delay, random, &s);
   };
 
+  // The sounds of phase 5. |basic_kind| is kKey, kRankUp or kBreak.
+  const auto basic = [&](DopagakiSoundKind basic_kind) {
   switch (sound_set) {
     case DopagakiConfig::PICO:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           tone(kSquare, 660 + r * 120 + random() * 80, 880 + r * 160, 0.06,
                0.06);
@@ -185,10 +187,12 @@ std::vector<float> SynthesizeDopagakiSound(
         case DopagakiSoundKind::kBreak:
           tone(kSquare, 440, 55, 0.5, 0.09);
           break;
+        default:
+          break;
       }
       break;
     case DopagakiConfig::TYPEWRITER:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           noise(0.03, 0.35, 2500);
           break;
@@ -200,10 +204,12 @@ std::vector<float> SynthesizeDopagakiSound(
           noise(0.25, 0.5, 300);
           tone(kTriangle, 180, 60, 0.35, 0.12);
           break;
+        default:
+          break;
       }
       break;
     case DopagakiConfig::HIT:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           tone(kSine, 160 + r * 20, 50, 0.09, 0.25);
           noise(0.04, 0.18, 1800);
@@ -216,10 +222,12 @@ std::vector<float> SynthesizeDopagakiSound(
           noise(0.5, 0.55, 200);
           tone(kSawtooth, 220, 40, 0.6, 0.12);
           break;
+        default:
+          break;
       }
       break;
     case DopagakiConfig::TAIKO:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           tone(kSine, 140 + r * 15, 70, 0.16, 0.35);
           break;
@@ -232,10 +240,12 @@ std::vector<float> SynthesizeDopagakiSound(
           tone(kSine, 90, 35, 0.9, 0.5);
           noise(0.15, 0.2, 900, 0.02);
           break;
+        default:
+          break;
       }
       break;
     case DopagakiConfig::SPARKLE:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           tone(kSine, 1500 + random() * 900 + r * 200, 2400 + r * 200, 0.09,
                0.05);
@@ -254,10 +264,12 @@ std::vector<float> SynthesizeDopagakiSound(
           }
           break;
         }
+        default:
+          break;
       }
       break;
     case DopagakiConfig::MECHA:
-      switch (kind) {
+      switch (basic_kind) {
         case DopagakiSoundKind::kKey:
           // Twice the preview's 0.04, as Kouta asked: with 0.04 it was the
           // quietest key sound, about 7 dB below Pico.
@@ -271,10 +283,72 @@ std::vector<float> SynthesizeDopagakiSound(
           tone(kSawtooth, 1800, 40, 0.6, 0.08);
           noise(0.4, 0.3, 500);
           break;
+        default:
+          break;
       }
       break;
     case DopagakiConfig::MUTE:
     default:
+      break;
+  }
+  };
+
+  // praise(r, d) of update 1 (1.11).
+  const auto praise = [&](double pr, double d) {
+    const double p = std::pow(2.0, 2 * pr / 12);
+    switch (sound_set) {
+      case DopagakiConfig::PICO:
+        tone(kSquare, 988 * p, 988 * p, 0.06, 0.06, d);
+        tone(kSquare, 1319 * p, 1319 * p, 0.12, 0.07, d + 0.06);
+        break;
+      case DopagakiConfig::TYPEWRITER:
+        tone(kSine, 2093 * p, 2093 * p, 0.35, 0.09, d);
+        tone(kSine, 4186 * p, 4186 * p, 0.2, 0.03, d);
+        break;
+      case DopagakiConfig::HIT:
+        for (const double t : {0.0, 0.09}) {
+          tone(kSine, 180 + pr * 20, 50, 0.08, 0.3, d + t);
+          noise(0.05, 0.22, 1500, d + t);
+        }
+        break;
+      case DopagakiConfig::TAIKO:
+        tone(kSine, 150 + pr * 15, 70, 0.15, 0.4, d);
+        noise(0.04, 0.25, 3000, d + 0.12);
+        break;
+      case DopagakiConfig::SPARKLE: {
+        const double notes[] = {2637, 3136, 3951};
+        for (int i = 0; i < 3; ++i) {
+          tone(kSine, notes[i] * p, notes[i] * p, 0.15, 0.05, d + i * 0.04);
+        }
+        break;
+      }
+      case DopagakiConfig::MECHA:
+        tone(kSawtooth, 600 * p, 1800 * p, 0.12, 0.05, d);
+        tone(kSquare, 1800 * p, 1800 * p, 0.08, 0.03, d + 0.1);
+        break;
+      case DopagakiConfig::MUTE:
+      default:
+        break;
+    }
+  };
+
+  switch (kind) {
+    case DopagakiSoundKind::kKey:
+    case DopagakiSoundKind::kRankUp:
+    case DopagakiSoundKind::kBreak:
+      basic(kind);
+      break;
+    case DopagakiSoundKind::kPraise:
+      praise(r, 0);
+      break;
+    case DopagakiSoundKind::kRankUpPraise:
+      basic(DopagakiSoundKind::kRankUp);
+      praise(r, 0.25);
+      break;
+    case DopagakiSoundKind::kMilestone:
+      basic(DopagakiSoundKind::kRankUp);
+      praise(4, 0.32);
+      praise(4, 0.5);
       break;
   }
   return s;

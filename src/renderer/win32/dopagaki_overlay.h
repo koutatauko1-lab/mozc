@@ -162,6 +162,16 @@ class DopagakiOverlay {
   bool CreateGlowText(const std::wstring& text, IDWriteTextFormat* format,
                       const D2D1_COLOR_F& color, float blur1, float blur2,
                       float shadow_y, GlowText* glow_text);
+  // Update 1 (1.10): like CreateGlowText, but the two glows have their own
+  // colors, and the text is filled with the rainbow of |rainbow_hue| if set.
+  bool CreateMilestoneText(const std::wstring& text, IDWriteTextFormat* format,
+                           const D2D1_COLOR_F& color,
+                           std::optional<double> rainbow_hue,
+                           const D2D1_COLOR_F& glow1_color, float blur1,
+                           const D2D1_COLOR_F& glow2_color, float blur2,
+                           float shadow_y, GlowText* glow_text);
+  void DrawMilestoneBanner(const DopagakiBanner& banner,
+                           const D2D1::Matrix3x2F& base);
   // Update 1.
   bool MeasurePraise(const DopagakiPraiseChoice& choice, PraiseText* text);
   bool CreatePraiseSprite(const DopagakiPraiseChoice& choice,
@@ -207,6 +217,8 @@ class DopagakiOverlay {
 
   uint64_t banner_cache_id_ = 0;
   GlowText banner_text_;
+  // Update 1: the word below "200 COMBO!!".
+  GlowText banner_subtitle_text_;
   uint64_t combo_label_cache_id_ = 0;
   GlowText combo_label_text_;
   uint64_t badge_cache_id_ = 0;

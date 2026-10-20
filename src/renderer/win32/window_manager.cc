@@ -491,18 +491,25 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
     return;
   }
 
-  // Sound (phase 5): one sound per event. A keystroke that raised the rank
-  // plays the rank-up sound instead of the key sound. BREAK also plays when
-  // the combo was already 0.
+  // Sound: one sound per event (phase 5). BREAK also plays when the combo was
+  // already 0. Update 1 (1.11): BREAK > milestone > rank-up with a praise
+  // word > rank-up > praise word > keystroke.
+  const auto has = [&actions](DopagakiAction::Type type) {
+    return std::any_of(
+        actions.begin(), actions.end(),
+        [type](const DopagakiAction& action) { return action.type == type; });
+  };
   DopagakiSoundKind sound_kind = DopagakiSoundKind::kKey;
-  for (const DopagakiAction& action : actions) {
-    if (action.type == DopagakiAction::Type::kRankUp) {
-      sound_kind = DopagakiSoundKind::kRankUp;
-      break;
-    }
-    if (action.type == DopagakiAction::Type::kBreak) {
-      sound_kind = DopagakiSoundKind::kBreak;
-    }
+  if (has(DopagakiAction::Type::kBreak)) {
+    sound_kind = DopagakiSoundKind::kBreak;
+  } else if (has(DopagakiAction::Type::kMilestone)) {
+    sound_kind = DopagakiSoundKind::kMilestone;
+  } else if (has(DopagakiAction::Type::kRankUp)) {
+    sound_kind = has(DopagakiAction::Type::kPraise)
+                     ? DopagakiSoundKind::kRankUpPraise
+                     : DopagakiSoundKind::kRankUp;
+  } else if (has(DopagakiAction::Type::kPraise)) {
+    sound_kind = DopagakiSoundKind::kPraise;
   }
   RequestDopagakiSound(event.receiver_window_handle(), sound_kind);
 
@@ -556,7 +563,8 @@ void WindowManager::OnDopagakiEvent(const commands::DopagakiEvent& event) {
         }
         break;
       case DopagakiAction::Type::kMilestone:
-        // Update 1: the big banner of 200, 300, ... comes in phase U3.
+        // Update 1 (1.10): the big banner of 200, 300, ...
+        effects.OnMilestone(action.count);
         break;
       case DopagakiAction::Type::kPraise:
         // Update 1. After kRankUp, so that the new banner is kept free. If

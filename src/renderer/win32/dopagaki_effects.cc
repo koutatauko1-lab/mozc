@@ -93,6 +93,35 @@ constexpr Keyframe kBreakKeyframes[] = {
     {0.7, 1, 1.04f, -4, 0},
     {1, 0, 0.9f, -6, 30},
 };
+// Update 1 (1.10): showMilestone() in preview.html.
+constexpr Keyframe kMilestoneKeyframes[] = {
+    {0, 0, 0.3f, 0, 0},  {0.15, 1, 1.2f, 0, 0}, {0.25, 1, 1, 0, 0},
+    {0.78, 1, 1, 0, 0},  {1, 0, 1.5f, 0, 0},
+};
+constexpr Keyframe kMilestoneSubtitleKeyframes[] = {
+    {0, 0, 0.6f, 0, 0},   {0.2, 0, 0.6f, 0, 0}, {0.3, 1, 1.08f, 0, 0},
+    {0.36, 1, 1, 0, 0},   {0.78, 1, 1, 0, 0},   {1, 0, 1.2f, 0, 0},
+};
+constexpr double kMilestoneDurationMs = 1700;
+
+// Linear between the keyframes at |progress| in [0, 1].
+DopagakiBannerFrame InterpolateKeyframes(std::span<const Keyframe> keyframes,
+                                         double progress) {
+  size_t index = 0;
+  while (index + 2 < keyframes.size() &&
+         progress > keyframes[index + 1].offset) {
+    ++index;
+  }
+  const Keyframe& from = keyframes[index];
+  const Keyframe& to = keyframes[index + 1];
+  const float local = static_cast<float>(
+      std::clamp((progress - from.offset) / (to.offset - from.offset), 0.0,
+                 1.0));
+  const auto lerp = [local](float a, float b) { return a + (b - a) * local; };
+  return {lerp(from.opacity, to.opacity), lerp(from.scale, to.scale),
+          lerp(from.rotation_degrees, to.rotation_degrees),
+          lerp(from.offset_y, to.offset_y)};
+}
 
 std::wstring ToWide(const char* text) {
   std::wstring result;
@@ -129,7 +158,15 @@ DopagakiColor DopagakiColorFromHsl(double hue, double saturation,
 }
 
 double GetDopagakiBannerDurationMs(DopagakiBannerKind kind) {
-  return kind == DopagakiBannerKind::kRankUp ? 1000 : 1100;
+  switch (kind) {
+    case DopagakiBannerKind::kRankUp:
+      return 1000;
+    case DopagakiBannerKind::kBreak:
+      return 1100;
+    case DopagakiBannerKind::kMilestone:
+      return kMilestoneDurationMs;
+  }
+  return 1000;
 }
 
 DopagakiBannerFrame GetDopagakiBannerFrame(DopagakiBannerKind kind,
@@ -138,24 +175,22 @@ DopagakiBannerFrame GetDopagakiBannerFrame(DopagakiBannerKind kind,
       elapsed_ms / GetDopagakiBannerDurationMs(kind), 0.0, 1.0);
   // The easing of the whole animation. Keyframes are linear in between.
   const double progress = DopagakiCubicBezier(0.2, 0.8, 0.2, 1, t);
-  const Keyframe* keyframes = kind == DopagakiBannerKind::kRankUp
-                                  ? kRankUpKeyframes
-                                  : kBreakKeyframes;
-  constexpr size_t kCount = std::size(kRankUpKeyframes);
-  static_assert(kCount == std::size(kBreakKeyframes));
-  size_t index = 0;
-  while (index + 2 < kCount && progress > keyframes[index + 1].offset) {
-    ++index;
+  switch (kind) {
+    case DopagakiBannerKind::kRankUp:
+      return InterpolateKeyframes(kRankUpKeyframes, progress);
+    case DopagakiBannerKind::kBreak:
+      return InterpolateKeyframes(kBreakKeyframes, progress);
+    case DopagakiBannerKind::kMilestone:
+      return InterpolateKeyframes(kMilestoneKeyframes, progress);
   }
-  const Keyframe& from = keyframes[index];
-  const Keyframe& to = keyframes[index + 1];
-  const float local = static_cast<float>(
-      std::clamp((progress - from.offset) / (to.offset - from.offset), 0.0,
-                 1.0));
-  const auto lerp = [local](float a, float b) { return a + (b - a) * local; };
-  return {lerp(from.opacity, to.opacity), lerp(from.scale, to.scale),
-          lerp(from.rotation_degrees, to.rotation_degrees),
-          lerp(from.offset_y, to.offset_y)};
+  return InterpolateKeyframes(kRankUpKeyframes, progress);
+}
+
+DopagakiBannerFrame GetDopagakiMilestoneSubtitleFrame(double elapsed_ms) {
+  // Linear as a whole.
+  return InterpolateKeyframes(
+      kMilestoneSubtitleKeyframes,
+      std::clamp(elapsed_ms / kMilestoneDurationMs, 0.0, 1.0));
 }
 
 float GetDopagakiComboLabelScale(double age_ms) {
@@ -276,6 +311,7 @@ void DopagakiEffects::Clear() {
   banner_.reset();
   combo_label_.reset();
   flash_elapsed_ms_ = kFlashDurationMs;
+  white_flash_elapsed_ms_ = kWhiteFlashDurationMs;
   shake_amount_ = 0;
   shake_x_ = 0;
   shake_y_ = 0;
@@ -401,6 +437,24 @@ void DopagakiEffects::OnBreak(float origin_x, float origin_y) {
            .color = DopagakiColorFromRgb(kBreakColor),
            .shard = true});
   }
+}
+
+// showMilestone() in preview.html.
+void DopagakiEffects::OnMilestone(uint64_t combo) {
+  StartBanner(DopagakiBannerKind::kMilestone,
+              std::to_wstring(combo) + L" COMBO!!",
+              DopagakiColorFromHsl(hue_, 1, 0.62));
+  banner_->subtitle = std::wstring(praise_picker_.NextMilestoneWord());
+  banner_->hue = hue_;
+  // Fireworks at 12 random places, each particle with a random hue.
+  for (int i = 0; i < 12; ++i) {
+    const float x = static_cast<float>(random_() * width_);
+    const float y = static_cast<float>(random_() * height_);
+    Burst(x, y, 40,
+          {.speed = 9, .size = 4, .rainbow_hue = 0.0, .rainbow_range = 360});
+  }
+  white_flash_elapsed_ms_ = 0;
+  shake_amount_ = std::max(shake_amount_, 16.0f);
 }
 
 DopagakiPraiseChoice DopagakiEffects::ChoosePraise(
@@ -690,6 +744,8 @@ void DopagakiEffects::Update(double elapsed_ms) {
   }
   flash_elapsed_ms_ = std::min(flash_elapsed_ms_ + elapsed_ms,
                                static_cast<double>(kFlashDurationMs));
+  white_flash_elapsed_ms_ = std::min(white_flash_elapsed_ms_ + elapsed_ms,
+                                     kWhiteFlashDurationMs);
   if (combo_label_.has_value()) {
     combo_label_->age_ms += elapsed_ms;
     if (combo_label_->age_ms >= kComboLabelLifetimeMs) {
@@ -731,6 +787,7 @@ void DopagakiEffects::Update(double elapsed_ms) {
 bool DopagakiEffects::IsActive() const {
   return !particles_.empty() || banner_.has_value() ||
          combo_label_.has_value() || flash_opacity() > 0 ||
+         white_flash_opacity() > 0 ||
          shake_amount_ > 0.2f || IsEdgeVisible() ||
          IsCandidateFrameVisible() || !praises_.empty() || !rings_.empty();
 }
@@ -797,6 +854,14 @@ float DopagakiEffects::flash_opacity() const {
                             (1 - EaseOut(flash_elapsed_ms_ / kFlashDurationMs)));
 }
 
+float DopagakiEffects::white_flash_opacity() const {
+  if (white_flash_elapsed_ms_ >= kWhiteFlashDurationMs) {
+    return 0;
+  }
+  return static_cast<float>(
+      0.35 * (1 - EaseOut(white_flash_elapsed_ms_ / kWhiteFlashDurationMs)));
+}
+
 // burst() in preview.html.
 void DopagakiEffects::Burst(float x, float y, int count,
                             const BurstOptions& options) {
@@ -812,8 +877,8 @@ void DopagakiEffects::Burst(float x, float y, int count,
     p.decay = static_cast<float>(0.012 + random_() * 0.02);
     p.size = static_cast<float>(options.size * (0.5 + random_()));
     if (options.rainbow_hue.has_value()) {
-      p.color =
-          DopagakiColorFromHsl(*options.rainbow_hue + random_() * 300, 1, 0.62);
+      p.color = DopagakiColorFromHsl(
+          *options.rainbow_hue + random_() * options.rainbow_range, 1, 0.62);
     } else {
       p.color = options.color.has_value() ? *options.color
                                           : GetParticleColor(options.rank);

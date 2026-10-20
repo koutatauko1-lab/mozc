@@ -55,8 +55,9 @@ struct DopagakiParticle {
 };
 
 enum class DopagakiBannerKind {
-  kRankUp,  // "S RANK!!"
-  kBreak,   // "BREAK"
+  kRankUp,     // "S RANK!!"
+  kBreak,      // "BREAK"
+  kMilestone,  // Update 1 (1.10): "200 COMBO!!" and a word below it.
 };
 
 struct DopagakiBanner {
@@ -65,6 +66,9 @@ struct DopagakiBanner {
   DopagakiColor color;
   double elapsed_ms = 0;
   uint64_t id = 0;  // Different for each banner.
+  // kMilestone: the word below, and the hue of the rainbow.
+  std::wstring subtitle;
+  double hue = 0;
 };
 
 // The transform of a banner at a moment, applied around the screen center.
@@ -78,6 +82,8 @@ struct DopagakiBannerFrame {
 double GetDopagakiBannerDurationMs(DopagakiBannerKind kind);
 DopagakiBannerFrame GetDopagakiBannerFrame(DopagakiBannerKind kind,
                                            double elapsed_ms);
+// Update 1 (1.10): the word below "200 COMBO!!".
+DopagakiBannerFrame GetDopagakiMilestoneSubtitleFrame(double elapsed_ms);
 
 // K5: "29 COMBO A" shown near the caret when there is no candidate window.
 struct DopagakiComboLabel {
@@ -223,6 +229,7 @@ class DopagakiEffects {
   static constexpr double kPraiseCrumbleMs = 600;
   static constexpr double kRingDurationMs = 450;
   static constexpr double kGlitchRollMs = 50;
+  static constexpr double kWhiteFlashDurationMs = 500;
 
   explicit DopagakiEffects(RandomFunction random);
   DopagakiEffects(const DopagakiEffects&) = delete;
@@ -239,6 +246,8 @@ class DopagakiEffects {
   void OnRankUp(DopagakiRank rank);
   // The combo was broken (only when the combo was not 0).
   void OnBreak(float origin_x, float origin_y);
+  // Update 1 (1.10): the combo reached |combo| (200, 300, ...).
+  void OnMilestone(uint64_t combo);
   void ShowComboLabel(uint64_t combo, DopagakiRank rank, float x, float y);
   void HideComboLabel();
   // The current rank, which decides the edge glow.
@@ -278,6 +287,8 @@ class DopagakiEffects {
     return combo_label_;
   }
   float flash_opacity() const;
+  // Update 1 (1.10): the white flash of a milestone.
+  float white_flash_opacity() const;
   // The shake offset of this frame.
   float shake_x() const { return shake_x_; }
   float shake_y() const { return shake_y_; }
@@ -305,8 +316,10 @@ class DopagakiEffects {
     float lift = 1.5f;
     DopagakiRank rank = DopagakiRank::kB;
     std::optional<DopagakiColor> color;  // Uses the rank color if empty.
-    // Rainbow praise words: hsl(rainbow_hue + 0..300, 100%, 62%) instead.
+    // Rainbow praise words: hsl(rainbow_hue + 0..rainbow_range, 100%, 62%)
+    // instead.
     std::optional<double> rainbow_hue;
+    double rainbow_range = 300;
     bool shard = false;
   };
 
@@ -331,6 +344,7 @@ class DopagakiEffects {
   std::optional<DopagakiBanner> banner_;
   std::optional<DopagakiComboLabel> combo_label_;
   double flash_elapsed_ms_ = kFlashDurationMs;
+  double white_flash_elapsed_ms_ = kWhiteFlashDurationMs;
   float shake_amount_ = 0;
   float shake_x_ = 0;
   float shake_y_ = 0;

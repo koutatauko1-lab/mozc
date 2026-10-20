@@ -95,7 +95,8 @@ TEST(DopagakiSoundSynthTest, PicoRankUpIsFourNotes) {
 TEST(DopagakiSoundSynthTest, MuteIsSilent) {
   for (const DopagakiSoundKind kind :
        {DopagakiSoundKind::kKey, DopagakiSoundKind::kRankUp,
-        DopagakiSoundKind::kBreak}) {
+        DopagakiSoundKind::kBreak, DopagakiSoundKind::kPraise,
+        DopagakiSoundKind::kRankUpPraise, DopagakiSoundKind::kMilestone}) {
     EXPECT_TRUE(SynthesizeDopagakiSound(DopagakiConfig::MUTE, kind, 4,
                                         TestRandom())
                     .empty());
@@ -112,6 +113,18 @@ TEST(DopagakiSoundSynthTest, SoundRequestRoundTrip) {
   EXPECT_EQ(sound_set, DopagakiConfig::TAIKO);
   EXPECT_EQ(kind, DopagakiSoundKind::kBreak);
   EXPECT_EQ(rank, 3);
+
+  // Update 1.
+  for (const DopagakiSoundKind new_kind :
+       {DopagakiSoundKind::kPraise, DopagakiSoundKind::kRankUpPraise,
+        DopagakiSoundKind::kMilestone}) {
+    ASSERT_TRUE(DecodeDopagakiSoundRequest(
+        EncodeDopagakiSoundRequest(DopagakiConfig::SPARKLE, new_kind, 4),
+        &sound_set, &kind, &rank));
+    EXPECT_EQ(sound_set, DopagakiConfig::SPARKLE);
+    EXPECT_EQ(kind, new_kind);
+    EXPECT_EQ(rank, 4);
+  }
 }
 
 TEST(DopagakiSoundSynthTest, InvalidSoundRequests) {
@@ -120,6 +133,7 @@ TEST(DopagakiSoundSynthTest, InvalidSoundRequests) {
   int rank = 0;
   // Unknown sound set, kind and rank.
   EXPECT_FALSE(DecodeDopagakiSoundRequest(99 << 16, &sound_set, &kind, &rank));
+  EXPECT_FALSE(DecodeDopagakiSoundRequest(6 << 8, &sound_set, &kind, &rank));
   EXPECT_FALSE(DecodeDopagakiSoundRequest(7 << 8, &sound_set, &kind, &rank));
   EXPECT_FALSE(DecodeDopagakiSoundRequest(5, &sound_set, &kind, &rank));
   EXPECT_FALSE(
@@ -143,7 +157,8 @@ TEST(DopagakiSoundSynthTest, AllSoundsAreAudibleAndSane) {
         DopagakiConfig::MECHA}) {
     for (const DopagakiSoundKind kind :
          {DopagakiSoundKind::kKey, DopagakiSoundKind::kRankUp,
-          DopagakiSoundKind::kBreak}) {
+          DopagakiSoundKind::kBreak, DopagakiSoundKind::kPraise,
+          DopagakiSoundKind::kRankUpPraise, DopagakiSoundKind::kMilestone}) {
       for (int rank = 0; rank <= 4; ++rank) {
         const std::vector<float> samples =
             SynthesizeDopagakiSound(sound_set, kind, rank, TestRandom());
@@ -162,6 +177,53 @@ TEST(DopagakiSoundSynthTest, AllSoundsAreAudibleAndSane) {
       }
     }
   }
+}
+
+TEST(DopagakiSoundSynthTest, RankUpPraiseIsLongerThanRankUp) {
+  for (const DopagakiConfig::SoundSet sound_set :
+       {DopagakiConfig::PICO, DopagakiConfig::TYPEWRITER, DopagakiConfig::HIT,
+        DopagakiConfig::TAIKO, DopagakiConfig::SPARKLE,
+        DopagakiConfig::MECHA}) {
+    SCOPED_TRACE(testing::Message() << "set=" << sound_set);
+    const size_t rank_up =
+        SynthesizeDopagakiSound(sound_set, DopagakiSoundKind::kRankUp, 1,
+                                TestRandom())
+            .size();
+    const size_t rank_up_praise =
+        SynthesizeDopagakiSound(sound_set, DopagakiSoundKind::kRankUpPraise, 1,
+                                TestRandom())
+            .size();
+    const size_t milestone =
+        SynthesizeDopagakiSound(sound_set, DopagakiSoundKind::kMilestone, 4,
+                                TestRandom())
+            .size();
+    // The praise part starts at 0.25 s, and the second one of the milestone
+    // at 0.5 s.
+    EXPECT_GE(rank_up_praise, rank_up);
+    EXPECT_GT(rank_up_praise,
+              static_cast<size_t>(0.25 * kDopagakiSampleRate));
+    EXPECT_GT(milestone, static_cast<size_t>(0.5 * kDopagakiSampleRate));
+  }
+}
+
+TEST(DopagakiSoundSynthTest, PraiseGoesUpWithTheRank) {
+  // P = 2^(2r/12): the first note of Pico is 988 Hz for B and higher for SSS.
+  const std::vector<float> b = SynthesizeDopagakiSound(
+      DopagakiConfig::PICO, DopagakiSoundKind::kPraise, 0, TestRandom());
+  const std::vector<float> sss = SynthesizeDopagakiSound(
+      DopagakiConfig::PICO, DopagakiSoundKind::kPraise, 4, TestRandom());
+  // Both are 0.06 + 0.12 + 0.02 s long.
+  EXPECT_EQ(b.size(), sss.size());
+  const auto crossings = [](const std::vector<float>& samples) {
+    int count = 0;
+    for (size_t i = 1; i < 2400; ++i) {  // The first 50 ms.
+      if ((samples[i - 1] < 0) != (samples[i] < 0)) {
+        ++count;
+      }
+    }
+    return count;
+  };
+  EXPECT_GT(crossings(sss), crossings(b));
 }
 
 }  // namespace
