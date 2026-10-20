@@ -12,18 +12,26 @@
 
 ### 入れ方
 
-1. このリポジトリの [Actions](https://github.com/koutatauko1-lab/mozc/actions/workflows/windows.yaml) で、いちばん新しい成功したビルドを開き、`Mozc64_x64.msi` をダウンロードします（GitHub へのログインが必要です）。
-2. ダウンロードした zip を展開し、中の `Mozc64.msi` を開きます。管理者の確認画面が出たら「はい」を押します。
+1. [リリースのページ](https://github.com/koutatauko1-lab/mozc/releases/latest)から `DopagakiIME-1.0-x64.msi` をダウンロードします（GitHub のアカウントは要りません）。
+2. ダウンロードしたファイルを開きます。
+   - 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押します（電子署名をしていないため出ます）。
+   - 管理者の確認画面が出たら「はい」を押します。
 3. インストールが終わったら PC を再起動します。
 4. Win＋スペースで「ドパガキIME」を選びます。
 
 消すときは、Windows の設定 →「アプリ」→「ドパガキIME」→「アンインストール」です。
 
+### 気をつけること
+
+- Windows 10（1809 以降）/ 11 の 64 ビット版用です（ARM 版の Windows は対象外です）。
+- 本物の Mozc とは同時に入れられません（同じ部品の名前を使っているため）。Google 日本語入力や Microsoft IME とは一緒に使えます。
+- 自動アップデートはありません。新しい版はリリースのページから入れ直してください（上書きでインストールできます）。
+
 ### このフォークについて
 
 - 仕様・設計・進捗は [DOPAGAKI.md](DOPAGAKI.md)、演出と効果音の見本は [docs/dopagaki/preview.html](docs/dopagaki/preview.html) にあります。
-- ビルドは GitHub Actions（`.github/workflows/windows.yaml`）で行います。
-- ライセンスは Mozc と同じ BSD 3-Clause です（[LICENSE](LICENSE)）。Mozc と Google はこのフォークとは関係ありません。
+- ビルドは GitHub Actions（`.github/workflows/windows.yaml`）で行います。開発中の最新版は [Actions](https://github.com/koutatauko1-lab/mozc/actions/workflows/windows.yaml) の成功したビルドから取れます（GitHub へのログインが必要です）。
+- ライセンスは Mozc と同じ BSD 3-Clause です（[LICENSE](LICENSE)）。インストールされる `documents/credits_en.html` にも著作権表示があります。Mozc と Google はこのフォークとは関係ありません。
 
 以下は、もとの Mozc の README です。
 
