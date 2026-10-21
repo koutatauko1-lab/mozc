@@ -694,6 +694,10 @@ jobs:
   - インストーラーの作成者（「アプリ」一覧の発行元）を `Google LLC` から `koutatauko1-lab` に変えた。インストーラーのエラーの文言も「Mozc」から「ドパガキIME」にした。ファイルの著作権表示（Copyright Google LLC）と `documents/credits_en.html` は、BSD 3-Clause ライセンスの決まりなので残す。
   - `README.md` の入れ方をリリースのページから入れる手順にした（電子署名が無いので「Windows によって PC が保護されました」が出ること、本物の Mozc と同時には入れられないこと、自動アップデートが無いこと、Windows 10 1809 以降の x64 だけ、も書いた）。
   - リリースに付けるファイル名は `DopagakiIME-1.0-x64.msi`。
+  - **v1.0 を公開した**：https://github.com/koutatauko1-lab/mozc/releases/tag/v1.0 （CI run 22、コミット `0e5d6483`、内部のバージョン `3.34.6345.1220`、SHA-256 `E3F067B951A2F187C39B0825696D74CEDC614F67CBC8DEF8F2B31202D1F531CC`）。インストーラーの名前が「ドパガキIME」、作成者が「koutatauko1-lab」であることを MSI の中身で確認。ログインなしでダウンロードできることも確認（`releases/latest` は v1.0 を指す）。
+  - コードはこーたが確認した `3.34.6345.1210` と同じで、違うのはインストーラーの名前と文言だけ。
+  - タグ `v1.0` を作ったときに同じ内容のビルドがもう1回動き出したので、止めた（タグのときは `paths-ignore` が効かないため）。
+  - リリースの作り方（次の版のとき）：CI の成功したビルドの `Mozc64.msi` を `DopagakiIME-<版>-x64.msi` に名前を変えて、`gh release create v<版> <ファイル> --target <コミット> --title "ドパガキIME v<版>" --notes-file <説明>` で作る。公開はこーたの OK をもらってから。
   - `DopagakiConfig.praise_enabled = 3 [default = true]`。メニューの「ドパガキ演出」のすぐ下に「褒め言葉」（`kDopagakiPraiseToggle = 58`、`IDS_DOPAGAKI_PRAISE_TOGGLE 148`）。チェックの付け方と保存はフェーズ6と同じ作り。
   - レンダラーは OFF のとき `kPraise` と `kMilestone` を捨てる。音も自然に「1打」と「ランクアップ」だけになる。出ている途中の褒め言葉は最後まで出る。設定が変わったときのログは `[dopagaki] settings: enabled=… sound_set=… praise=…`。
   - `README.md` に褒め言葉と特大版のことを書いた。
